@@ -19,7 +19,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 RUN pip3 install git+https://github.com/CapableRobot/CapableRobot_USBHub_Driver --upgrade
 
-RUN git clone https://github.com/mvp/uhubctl \
+RUN curl -L https://github.com/mvp/uhubctl/archive/refs/tags/v2.5.0.tar.gz > uhubctl-2.5.0.tar.gz \
+    && tar -xvzf uhubctl-2.5.0.tar.gz \
+    && rm uhubctl-2.5.0.tar.gz \
     cd uhubctl \
     make \
     make install
