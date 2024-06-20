@@ -17,7 +17,7 @@ pipeline {
         }
         stage('Test') {
             steps {
-                sh './ci-scripts/configure-hubs.sh --off'
+                sh './ci-scripts/configure-hubs.sh off'
                 retry(3) {
                     sh './ci-scripts/test-host.sh'
                 }
@@ -32,9 +32,9 @@ pipeline {
                 retry(3) {
                     sh 'python3 ci-scripts/test-transfer.py rx'
                 }
-                sh './ci-scripts/configure-hubs.sh --off'
+                sh './ci-scripts/configure-hubs.sh off'
                 sh 'python3 ci-scripts/test-sgpio-debug.py'
-                sh './ci-scripts/configure-hubs.sh --reset'
+                sh './ci-scripts/configure-hubs.sh cycle'
             }
         }
     }
