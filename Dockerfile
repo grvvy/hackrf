@@ -19,5 +19,10 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 RUN pip3 install git+https://github.com/CapableRobot/CapableRobot_USBHub_Driver --upgrade
 
+RUN git clone https://github.com/mvp/uhubctl \
+    cd uhubctl \
+    make \
+    make install
+
 # Inform Docker that the container is listening on port 8080 at runtime
 EXPOSE 8080
