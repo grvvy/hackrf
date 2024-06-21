@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-yaml \
+    usbutils \
     && rm -rf /var/lib/apt/lists/*
 RUN pip3 install git+https://github.com/CapableRobot/CapableRobot_USBHub_Driver --upgrade
 
