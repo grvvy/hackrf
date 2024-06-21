@@ -7,6 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
+    curl \
     dfu-util \
     gcc-arm-none-eabi \
     git \
