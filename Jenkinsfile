@@ -17,17 +17,31 @@ pipeline {
         }
         stage('Test') {
             steps {
-                sh 'uhubctl'
-                sh 'lsusb'
-                sh 'uhubctl -l 3-1.3 -p 3 -a cycle'
-                sh 'sleep 2s'
-                sh 'uhubctl'
-                sh 'lsusb'
+                sh './ci-scripts/configure-hubs.sh off'
+                retry(3) {
+                    sh './ci-scripts/test-host.sh'
+                }
+                retry(3) {
+                    sh './ci-scripts/test-firmware-program.sh'
+                }
+                sh './ci-scripts/test-firmware-flash.sh'
+                sh 'python3 ci-scripts/test-debug.py'
+                retry(3) {
+                    sh 'python3 ci-scripts/test-transfer.py tx'
+                }
+                retry(3) {
+                    sh 'python3 ci-scripts/test-transfer.py rx'
+                }
+                sh './ci-scripts/configure-hubs.sh off'
+                sh 'python3 ci-scripts/test-sgpio-debug.py'
+                sh './ci-scripts/configure-hubs.sh cycle'
             }
         }
     }
     post {
         always {
+            sh 'uhubctl -l 3-1 -p 1,2,4 -a cycle'
+            sh 'uhubctl -l 3-1.3 -a cycle'
             cleanWs(cleanWhenNotBuilt: false,
                     deleteDirs: true,
                     disableDeferredWipeout: true,
