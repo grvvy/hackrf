@@ -89,7 +89,7 @@ def main():
     write_bytes()
     # tester_hub_on = subprocess.Popen(["usbhub", "--disable-i2c", "--hub", "624C",
     #                                   "power", "state", "--port", "2", "--reset"])
-    tester_hub_on = subprocess.Popen(["uhubctl", "-l", "3-1.3", "-p", "3", "-a", "cycle"])
+    tester_hub_on = subprocess.Popen(["uhubctl", "-l", "3-1.3", "-p", "2", "-a", "cycle"])
     tester_hub_on.wait()
     time.sleep(1)
     eut_clkout_on       = subprocess.Popen(["host/build/hackrf-tools/src/hackrf_clock",
