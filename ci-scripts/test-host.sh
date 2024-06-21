@@ -1,5 +1,6 @@
 #!/bin/bash
-usbhub --disable-i2c --hub D9D1 power state --port 2 --reset
+# usbhub --disable-i2c --hub D9D1 power state --port 2 --reset
+uhubctl -l 3-1.3 -p 3 -a cycle
 sleep 1s
 host/build/hackrf-tools/src/hackrf_info
 EXIT_CODE="$?"
