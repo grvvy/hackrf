@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y \
     python3-yaml \
     usbutils \
     && rm -rf /var/lib/apt/lists/*
-RUN pip3 install git+https://github.com/CapableRobot/CapableRobot_USBHub_Driver --upgrade
+RUN pip3 install python-dotenv git+https://github.com/CapableRobot/CapableRobot_USBHub_Driver --upgrade
 
 RUN curl -L https://github.com/mvp/uhubctl/archive/refs/tags/v2.5.0.tar.gz > uhubctl-2.5.0.tar.gz \
     && mkdir uhubctl-2.5.0 \
@@ -28,6 +28,11 @@ RUN curl -L https://github.com/mvp/uhubctl/archive/refs/tags/v2.5.0.tar.gz > uhu
     && cd uhubctl-2.5.0 \
     && make \
     && make install
+
+COPY --from=jenkins-jenkins /startup/hubs.py /startup/hubs.py
+COPY --from=jenkins-jenkins /startup/.hubs /startup/.hubs
+
+RUN ln -s /startup/hubs.py /usr/local/bin/hubs
 
 # Inform Docker that the container is listening on port 8080 at runtime
 EXPOSE 8080
