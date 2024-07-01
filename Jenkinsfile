@@ -17,7 +17,7 @@ pipeline {
         }
         stage('Test') {
             steps {
-                sh './ci-scripts/configure-hubs.sh off'
+                sh 'hubs all off'
                 retry(3) {
                     sh './ci-scripts/test-host.sh'
                 }
@@ -32,16 +32,15 @@ pipeline {
                 retry(3) {
                     sh 'python3 ci-scripts/test-transfer.py rx'
                 }
-                sh './ci-scripts/configure-hubs.sh off'
+                sh 'hubs all off'
                 sh 'python3 ci-scripts/test-sgpio-debug.py'
-                sh './ci-scripts/configure-hubs.sh cycle'
+                sh 'hubs all reset'
             }
         }
     }
     post {
         always {
-            sh 'uhubctl -l 3-1 -p 1,2,4 -a cycle'
-            sh 'uhubctl -l 3-1.3 -a cycle'
+            sh 'hubs all reset'
             cleanWs(cleanWhenNotBuilt: false,
                     deleteDirs: true,
                     disableDeferredWipeout: true,
