@@ -1,8 +1,8 @@
 #!/bin/bash
 hubs hackrf_dfu reset
-sleep 1s
+sleep 5s
 dfu-util --device 1fc9:000c --alt 0 --download firmware/hackrf_usb/build/hackrf_usb.dfu
-sleep 1s
+sleep 5s
 EXIT_CODE="$?"
 if [ "$EXIT_CODE" == "0" ]
 then

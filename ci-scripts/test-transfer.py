@@ -90,7 +90,7 @@ def main():
     write_bytes()
     tester_hub_on = subprocess.Popen(["hubs", "hackrf", "reset"])
     tester_hub_on.wait()
-    time.sleep(1)
+    time.sleep(5)
     eut_clkout_on       = subprocess.Popen(["host/build/hackrf-tools/src/hackrf_clock",
                                             "-o", "1", "-d", EUT])
     tester_clkout_off   = subprocess.Popen(["host/build/hackrf-tools/src/hackrf_clock",
