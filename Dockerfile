@@ -31,6 +31,8 @@ RUN curl -L https://github.com/mvp/uhubctl/archive/refs/tags/v2.5.0.tar.gz > uhu
 
 COPY --from=jenkins-jenkins /startup/hubs.py /startup/hubs.py
 COPY --from=jenkins-jenkins /startup/.hubs /startup/.hubs
+COPY --from=jenkins-jenkins /30-uhubctl.rules /etc/udev/rules.d/30-uhubctl.rules
+
 
 RUN ln -s /startup/hubs.py /usr/local/bin/hubs
 
