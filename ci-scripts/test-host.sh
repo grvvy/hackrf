@@ -1,6 +1,6 @@
 #!/bin/bash
 hubs hackrf_dfu reset
-sleep 1s
+sleep 5s
 host/build/hackrf-tools/src/hackrf_info
 EXIT_CODE="$?"
 if [ "$EXIT_CODE" == "1" ]
