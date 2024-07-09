@@ -1,46 +1,48 @@
 pipeline {
-    agent {
-        dockerfile {
-            args '--group-add=20 --group-add=46 --device-cgroup-rule="c 189:* rmw" -v /dev/bus/usb:/dev/bus/usb'
-        }
-    }
+    agent any
     stages {
-        stage('Build (Host)') {
+        stage('Build Image') {
             steps {
-                sh './ci-scripts/install-host.sh'
+                sh 'docker build . -t hackrf'
             }
         }
-        stage('Build (Firmware)') {
+        stage('trusted_hil') {
+            agent {
+                docker {
+                    image 'hackrf'
+                    reuseNode true
+                }
+            }
             steps {
-                sh './ci-scripts/install-firmware.sh'
+                dir('master') {
+                    git url: 'https://github.com/grvvy/hackrf.git', branch:'master'
+                    sh 'pwd'
+                    sh 'ls -la'
+                }
+                sh 'pwd'
+                sh 'ls -la'
+                sh 'ls -la ci-scripts/'
+                sh 'cp -r master/ci-scripts ci-scripts/'
+                sh 'ls -la'
+                sh 'ls -la ci-scripts/'
             }
         }
-        stage('Test') {
+        stage ('Run') {
+            agent {
+                docker {
+                    image 'hackrf'
+                    reuseNode true
+                    args '--group-add=20 --group-add=46 --device-cgroup-rule="c 189:* rmw" --device-cgroup-rule="c 166:* rmw" -v /dev/bus/usb:/dev/bus/usb'
+                }
+            }
             steps {
-                sh 'hubs all off'
-                retry(3) {
-                    sh './ci-scripts/test-host.sh'
-                }
-                retry(3) {
-                    sh './ci-scripts/test-firmware-program.sh'
-                }
-                sh './ci-scripts/test-firmware-flash.sh'
-                sh 'python3 ci-scripts/test-debug.py'
-                retry(3) {
-                    sh 'python3 ci-scripts/test-transfer.py tx'
-                }
-                retry(3) {
-                    sh 'python3 ci-scripts/test-transfer.py rx'
-                }
-                sh 'hubs all off'
-                sh 'python3 ci-scripts/test-sgpio-debug.py'
-                sh 'hubs all reset'
+                sh 'env'
+                sh 'sleep 180s'
             }
         }
     }
     post {
         always {
-            sh 'hubs all reset'
             cleanWs(cleanWhenNotBuilt: false,
                     deleteDirs: true,
                     disableDeferredWipeout: true,
