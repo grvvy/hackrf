@@ -3,7 +3,7 @@ pipeline {
     stages {
         stage('Build Image') {
             steps {
-                sh 'docker build -t hackrf https://github.com/grvvy/hackrf.git'
+                sh 'docker build -t hackrf https://github.com/grvvy/hackrf.git#jenkins_ports'
             }
         }
         stage('Test') {
@@ -32,9 +32,9 @@ pipeline {
                 retry(3) {
                     sh 'python3 ci-scripts/test-transfer.py rx'
                 }
-                sh './ci-scripts/configure-hubs.sh --off'
+                sh 'hubs all off'
                 sh 'python3 ci-scripts/test-sgpio-debug.py'
-                sh './ci-scripts/configure-hubs.sh --reset'
+                sh 'hubs all reset'
             }
         }
     }
