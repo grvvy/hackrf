@@ -3,7 +3,20 @@ pipeline {
     stages {
         stage('Build Image') {
             steps {
-                sh 'docker build . -t hackrf'
+                sh 'docker build -t hackrf https://github.com/grvvy/hackrf.git'
+            }
+        }
+        stage('Checkout master'){
+            agent {
+                docker {
+                    image 'hackrf'
+                    reuseNode true
+                }
+            }
+            steps {
+                dir('master') {
+                    git url: 'https://github.com/grvvy/hackrf.git', branch:'master'
+                }
             }
         }
         stage('trusted_hil') {
@@ -14,30 +27,44 @@ pipeline {
                 }
             }
             steps {
-                dir('master') {
-                    git url: 'https://github.com/grvvy/hackrf.git', branch:'master'
-                    sh 'pwd'
-                    sh 'ls -la'
-                }
                 sh 'pwd'
                 sh 'ls -la'
                 sh 'ls -la ci-scripts/'
+                sh 'rm -rf ci-scripts/'
                 sh 'cp -r master/ci-scripts ci-scripts/'
                 sh 'ls -la'
                 sh 'ls -la ci-scripts/'
             }
         }
-        stage ('Run') {
+        stage('Test') {
             agent {
                 docker {
                     image 'hackrf'
                     reuseNode true
-                    args '--group-add=20 --group-add=46 --device-cgroup-rule="c 189:* rmw" --device-cgroup-rule="c 166:* rmw" -v /dev/bus/usb:/dev/bus/usb'
+                    args '--group-add=20 --group-add=46 --device-cgroup-rule="c 189:* rmw" --device-cgroup-rule="c 166:* rmw" -v /dev/bus/usb:/dev/bus/usb --privileged'
                 }
             }
             steps {
-                sh 'env'
-                sh 'sleep 180s'
+                sh './ci-scripts/install-host.sh'
+                sh './ci-scripts/install-firmware.sh'
+                sh 'hubs all off'
+                retry(3) {
+                    sh './ci-scripts/test-host.sh'
+                }
+                retry(3) {
+                    sh './ci-scripts/test-firmware-program.sh'
+                }
+                sh './ci-scripts/test-firmware-flash.sh'
+                sh 'python3 ci-scripts/test-debug.py'
+                retry(3) {
+                    sh 'python3 ci-scripts/test-transfer.py tx'
+                }
+                retry(3) {
+                    sh 'python3 ci-scripts/test-transfer.py rx'
+                }
+                sh './ci-scripts/configure-hubs.sh --off'
+                sh 'python3 ci-scripts/test-sgpio-debug.py'
+                sh './ci-scripts/configure-hubs.sh --reset'
             }
         }
     }
