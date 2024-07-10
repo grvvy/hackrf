@@ -1,2 +1,7 @@
 #!/bin/bash
-echo 'shouldn't see this'
+set -e
+mkdir host/build
+cd host/build
+cmake ..
+make
+cd ../..

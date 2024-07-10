@@ -6,36 +6,6 @@ pipeline {
                 sh 'docker build -t hackrf https://github.com/grvvy/hackrf.git'
             }
         }
-        stage('Checkout master'){
-            agent {
-                docker {
-                    image 'hackrf'
-                    reuseNode true
-                }
-            }
-            steps {
-                dir('master') {
-                    git url: 'https://github.com/grvvy/hackrf.git', branch:'master'
-                }
-            }
-        }
-        stage('trusted_hil') {
-            agent {
-                docker {
-                    image 'hackrf'
-                    reuseNode true
-                }
-            }
-            steps {
-                sh 'pwd'
-                sh 'ls -la'
-                sh 'ls -la ci-scripts/'
-                sh 'rm -rf ci-scripts/'
-                sh 'cp -r master/ci-scripts ci-scripts/'
-                sh 'ls -la'
-                sh 'ls -la ci-scripts/'
-            }
-        }
         stage('Test') {
             agent {
                 docker {
