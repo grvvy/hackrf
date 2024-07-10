@@ -3,7 +3,7 @@ pipeline {
     stages {
         stage('Build Image') {
             steps {
-                sh 'docker build -t hackrf https://github.com/grvvy/hackrf.git#jenkins_ports'
+                sh 'docker build -t hackrf $GIT_URL'
             }
         }
         stage('Test') {
@@ -11,7 +11,7 @@ pipeline {
                 docker {
                     image 'hackrf'
                     reuseNode true
-                    args '--group-add=20 --group-add=46 --device-cgroup-rule="c 189:* rmw" --device-cgroup-rule="c 166:* rmw" -v /dev/bus/usb:/dev/bus/usb --privileged'
+                    args '--group-add=20 --group-add=46 --device-cgroup-rule="c 189:* rmw" --device-cgroup-rule="c 166:* rmw" -v /dev/bus/usb:/dev/bus/usb'
                 }
             }
             steps {
