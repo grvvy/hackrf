@@ -3,9 +3,11 @@ import subprocess
 import time
 import sys
 from os import environ
+from dotenv import load_dotenv
 
-EUT     = environ.get('EUT')
-TESTER  = environ.get('TESTER')
+load_dotenv('/startup/.hubs')
+EUT     = environ.get('HACKRF_EUT')
+TESTER  = environ.get('HACKRF_TESTER')
 PASS, FAIL = range(2)
 
 
