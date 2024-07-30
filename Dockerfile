@@ -35,5 +35,7 @@ RUN curl -L https://github.com/mvp/uhubctl/archive/refs/tags/v2.5.0.tar.gz > uhu
     && make \
     && make install
 
+COPY --from=gsg-jenkins /etc/udev/rules.d/30-uhubctl.rules /etc/udev/rules.d/30-uhubctl.rules
+
 # Inform Docker that the container is listening on port 8080 at runtime
 EXPOSE 8080
