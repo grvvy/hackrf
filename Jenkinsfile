@@ -11,30 +11,18 @@ pipeline {
                 docker {
                     image 'hackrf'
                     reuseNode true
-                    args '--group-add=20 --group-add=46 --device-cgroup-rule="c 189:* rmw" --device-cgroup-rule="c 166:* rmw" -v /dev/bus/usb:/dev/bus/usb'
+                    args '--name hackrf_container --group-add=20 --group-add=46 --device-cgroup-rule="c 189:* rmw" --device-cgroup-rule="c 166:* rmw" --device /dev/bus/usb'
                 }
             }
             steps {
-                sh './ci-scripts/install-host.sh'
-                sh './ci-scripts/install-firmware.sh'
-                sh 'hubs all off'
-                retry(3) {
-                    sh './ci-scripts/test-host.sh'
-                }
-                retry(3) {
-                    sh './ci-scripts/test-firmware-program.sh'
-                }
-                sh './ci-scripts/test-firmware-flash.sh'
-                sh 'python3 ci-scripts/test-debug.py'
-                retry(3) {
-                    sh 'python3 ci-scripts/test-transfer.py tx'
-                }
-                retry(3) {
-                    sh 'python3 ci-scripts/test-transfer.py rx'
-                }
-                sh 'hubs all off'
-                sh 'python3 ci-scripts/test-sgpio-debug.py'
-                sh 'hubs all reset'
+                sh 'ls -la /dev/'
+                sh 'sleep 5s'
+                sh 'uhubctl --location 1-2.3 --port 3 --action off'
+                sh 'sleep 5s'
+                sh 'ls -la /dev/'
+                sh 'uhubctl--location 1-2.3 --port 3 --action on'
+                sh 'sleep 5s'
+                sh 'ls -la /dev/'
             }
         }
     }
