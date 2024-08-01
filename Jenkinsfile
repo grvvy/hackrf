@@ -23,6 +23,7 @@ pipeline {
                 sh 'uhubctl--location 1-2.3 --port 3 --action on'
                 sh 'sleep 5s'
                 sh 'ls -la /dev/'
+                sh 'echo hello'
             }
         }
     }
