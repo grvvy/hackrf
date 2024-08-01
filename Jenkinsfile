@@ -25,6 +25,7 @@ pipeline {
                 sh 'ls -la /dev/'
                 sh 'echo hello'
                 sh 'echo hello'
+                sh 'echo hello'
             }
         }
     }
