@@ -24,6 +24,7 @@ pipeline {
                 sh 'sleep 5s'
                 sh 'ls -la /dev/'
                 sh 'echo hello'
+                sh 'echo hello'
             }
         }
     }
