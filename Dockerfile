@@ -27,11 +27,11 @@ RUN apt-get update && apt-get install -y \
 
 # Install USB hub PPPS dependencies
 RUN pip3 install python-dotenv git+https://github.com/CapableRobot/CapableRobot_USBHub_Driver --upgrade
-RUN curl -L https://github.com/mvp/uhubctl/archive/refs/tags/v2.5.0.tar.gz > uhubctl-2.5.0.tar.gz \
-    && mkdir uhubctl-2.5.0 \
-    && tar -xvzf uhubctl-2.5.0.tar.gz -C uhubctl-2.5.0 --strip-components 1 \
-    && rm uhubctl-2.5.0.tar.gz \
-    && cd uhubctl-2.5.0 \
+RUN curl -L https://github.com/mvp/uhubctl/archive/refs/tags/v2.6.0.tar.gz > uhubctl-2.6.0.tar.gz \
+    && mkdir uhubctl-2.6.0 \
+    && tar -xvzf uhubctl-2.6.0.tar.gz -C uhubctl-2.6.0 --strip-components 1 \
+    && rm uhubctl-2.6.0.tar.gz \
+    && cd uhubctl-2.6.0 \
     && make \
     && make install
 
