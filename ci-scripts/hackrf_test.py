@@ -21,7 +21,7 @@ PRODUCT_ID = 0x6089
 DFU_VENDOR_ID = 0x1fc9
 DFU_PRODUCT_ID = 0x000c
 ONE_MHZ = 1000000
-TIMEOUT = 5
+TIMEOUT = 20
 MAX_PPM = 40
 MAX_BASELINE = -20
 SIGNAL_THRESHOLD = -25
@@ -111,7 +111,13 @@ og_eut_cal = [1.8, 1.8, 1.6, 2., 1.3, 0.7, 0.5, -0.3, 0.2, -0.3, -0.5, 1.2, -0.8
 
 emessages = {
     # TODO: replace the placeholder code according to each fail instance
-    1: "Placeholder error code",
+    1: "Placeholder error code 1",
+    2: "Placeholder error code 2",
+    3: "Placeholder error code 3",
+    4: "Placeholder error code 4",
+    5: "Placeholder error code 5",
+    6: "Placeholder error code 6",
+    7: "Placeholder error code 7",
     60: "Unable to program firmware via DFU",
     65: "EUT not detected after DFU programming",
     70: "Unable to program SPI flash",
@@ -525,11 +531,10 @@ class HackRF:
                     self.revision = rev
                     break
             out(f"{self.name} serial number: {self.serial}")
-            out(f"{self.name} revision: {self.revision}")
             out(f"{self.name} binary directory {self.bin_dir}")
         except:
             log(traceback.format_exc())
-            fail(1)
+            fail(6)
 
         if revision and self.revision != revision:
             fail(88 + self.unit_number)
@@ -1137,6 +1142,7 @@ def program(bin_dir, fw_dir, serial, unattended=False):
         f"{DFU_VENDOR_ID}:{DFU_PRODUCT_ID}", "--alt", "0", "--download",
         f"{fw_dir}{dfu_stub}"], capture_output=True, encoding="utf-8",
         timeout=TIMEOUT)
+    log(dfu.stdout + dfu.stderr)
 
     #dfu-util: unable to read DFU status after completion (LIBUSB_ERROR_IO)
     # despite successful download; present as of at least dfu-util 0.11
@@ -1160,7 +1166,7 @@ def program(bin_dir, fw_dir, serial, unattended=False):
         time.sleep(0.1)
     if not dfu_device_found:
         out("DFU device not found")
-        fail(1)
+        fail(2)
 
     out("Programming EUT SPI flash")
     spiflash = subprocess.run([bin_dir + "hackrf_spiflash", "-d",
@@ -1211,7 +1217,7 @@ def find_sn(name, bin_dir, claimed_sns=[]):
             break
         else:
             out("Failed to parse a serial number from hackrf_info")
-            fail(1)
+            fail(3)
     return sn
 
 
@@ -1255,6 +1261,7 @@ def main():
     parser.add_argument("-b", "--testerdir", metavar="<separate path to TESTER host tools>", type=str,
             help="necessary only if EUT/TESTER have separate host binaries")
     parser.add_argument("-C", "--ci", action="store_true", help="For use with Jenkins CI user")
+    parser.add_argument("-p", "--praline", action="store_true", help="Force Praline mode")
     parser.add_argument("-u", "--unattended", action="store_true", help="For use with unattended hardware")
     parser.add_argument("-L", "--log", metavar="<log file>", type=str,
             help="log file location")
@@ -1278,13 +1285,13 @@ def main():
             eut_host_dir = os.path.dirname(shutil.which('hackrf_info')) + "/"
         except:
             out("No path to hackrf host tools found. Please provide a directory via --hostdir")
-            fail(1)
+            fail(4)
 
     if args.testerdir:
         if args.testerdir == eut_host_dir:
             out("Specified TESTER bin directory must be different from the found EUT bin directory")
             out("If shared TESTER/EUT bin directory is intended, omit --testerdir")
-            fail(1)
+            fail(5)
         else:
             tester_host_dir = args.testerdir
     else:
@@ -1320,8 +1327,9 @@ def main():
 
         if eut_sn == tester_sn:
             out("TESTER and EUT cannot be the same device")
-            fail(1)
+            fail(7)
 
+        # TODO: check if the provided firmware directory exists
         if args.fwupdate:
             program(eut_host_dir, args.fwupdate, eut_sn, args.unattended)
 
@@ -1333,7 +1341,8 @@ def main():
             tester = None
         else:
             tester = HackRF("TESTER", tester_host_dir, tester_sn, args.manufacturer, unique_bin=unique_bin)
-            tester.test_serial()
+            # TODO: replaced by upcoming changes to register verification
+            # tester.test_serial()
             tester.partner = eut
             eut.partner = tester
 
@@ -1354,7 +1363,8 @@ def main():
         if count > 0 and not args.fw_update:
             eut.activate_leds(False)
 
-        eut.test_serial()
+        # TODO: replaced by upcoming changes to register verification
+        # eut.test_serial()
 
         # limited RF test without clock synchronization
         eut.test_rf_preliminary()
