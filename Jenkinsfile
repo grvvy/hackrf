@@ -39,32 +39,14 @@ pipeline {
                 timeout(time: 20, unit: 'MINUTES')
             }
             steps {
-                sh './ci-scripts/install_host.sh'
-                sh './ci-scripts/build_firmware.sh HACKRF_ONE'
+                runCommand(3, 1, 'MINUTE', "Install Host Tools", './ci-scripts/install_host.sh')
+                runCommand(3, 1, 'MINUTE', "Build HackRF One Firmware", './ci-scripts/build_firmware.sh HACKRF_ONE')
                 lock('HIL_hubs') {
                     script {
                         allOff()
-                        reset('h1_eut')
-                    }
-                    sh 'sleep 1s'
-                    retry(3) {
-                        sh './ci-scripts/test_host.sh'
-                    }
-                    script {
-                        reset('h1_tester h1_eut')
-                    }
-                    sh 'sleep 1s'
-                    script {
-                        // Allow up to 3 retries 5 minutes each for the HIL test
-                        runCommand(3, 5, 'MINUTES', "HackRF One Test", h1_test)
-                    }
-                    script {
-                        allOff()
-                        reset('h1_eut')
-                    }
-                    sh 'sleep 1s'
-                    retry(3) {
-                        sh 'python3 ci-scripts/test_sgpio_debug.py'
+                        runTest("Check Host", 'h1_eut', './ci-scripts/test_host.sh')
+                        runTest("HackRF One HIL Test", 'h1_tester h1_eut', h1_test)
+                        runTest("SGPIO Debug Test", 'h1_eut', 'python3 ci-scripts/test_sgpio_debug.py')
                     }
                 }
             }
@@ -81,34 +63,17 @@ pipeline {
                 timeout(time: 20, unit: 'MINUTES')
             }
             steps {
-                sh './ci-scripts/install_host.sh'
-                sh './ci-scripts/build_firmware.sh UNIVERSAL'
+                runCommand(3, 1, 'MINUTE', "Install Host Tools", './ci-scripts/install_host.sh')
+                runCommand(3, 1, 'MINUTE', "Build Universal Firmware", './ci-scripts/build_firmware.sh UNIVERSAL')
                 lock('HIL_hubs') {
                     script {
                         allOff()
-                        reset('h1_eut')
-                    }
-                    sh 'sleep 1s'
-                    retry(3) {
-                        sh './ci-scripts/test_host.sh'
-                    }
-                    script {
-                        reset('h1_tester h1_eut')
-                    }
-                    sh 'sleep 1s'
-                    script {
-                        // Allow up to 3 retries 5 minutes each for the HIL test
-                        runCommand(3, 5, 'MINUTES', "HackRF One Test", h1_test)
-                    }
-                    script {
-                        allOff()
-                        reset('h1_eut')
-                    }
-                    sh 'sleep 1s'
-                    retry(3) {
-                        sh 'python3 ci-scripts/test_sgpio_debug.py'
+                        runTest("Check Host", 'h1_eut', './ci-scripts/test_host.sh')
+                        runTest("HackRF One HIL Test", 'h1_tester h1_eut', h1_test)
+                        runTest("SGPIO Debug Test", 'h1_eut', 'python3 ci-scripts/test_sgpio_debug.py')
                     }
                 }
+
             }
         }
         stage('Test HackRF Pro with BOARD=PRALINE') {
@@ -123,24 +88,13 @@ pipeline {
                 timeout(time: 20, unit: 'MINUTES')
             }
             steps {
-                sh './ci-scripts/install_host.sh'
-                sh './ci-scripts/build_firmware.sh PRALINE'
+                runCommand(3, 1, 'MINUTE', "Install Host Tools", './ci-scripts/install_host.sh')
+                runCommand(3, 1, 'MINUTE', "Build Praline Firmware", './ci-scripts/build_firmware.sh PRALINE')
                 lock('HIL_hubs') {
                     script {
                         allOff()
-                        reset('hpro_eut')
-                    }
-                    sh 'sleep 1s'
-                    retry(3) {
-                        sh './ci-scripts/test_host.sh'
-                    }
-                    script {
-                        reset('hpro_tester hpro_eut')
-                    }
-                    sh 'sleep 1s'
-                    script {
-                        // Allow up to 3 retries 5 minutes each for the HIL test
-                        runCommand(3, 5, 'MINUTES', "HackRF Pro Test", hpro_test)
+                        runTest("Check Host", 'hpro_eut', './ci-scripts/test_host.sh')
+                        runTest("HackRF Pro HIL Test", 'hpro_tester hpro_eut', hpro_test)
                     }
                 }
             }
@@ -157,24 +111,13 @@ pipeline {
                 timeout(time: 20, unit: 'MINUTES')
             }
             steps {
-                sh './ci-scripts/install_host.sh'
-                sh './ci-scripts/build_firmware.sh UNIVERSAL'
+                runCommand(3, 1, 'MINUTE', "Install Host Tools", './ci-scripts/install_host.sh')
+                runCommand(3, 1, 'MINUTE', "Build Universal Firmware", './ci-scripts/build_firmware.sh UNIVERSAL')
                 lock('HIL_hubs') {
                     script {
                         allOff()
-                        reset('hpro_eut')
-                    }
-                    sh 'sleep 1s'
-                    retry(3) {
-                        sh './ci-scripts/test_host.sh'
-                    }
-                    script {
-                        reset('hpro_tester hpro_eut')
-                    }
-                    sh 'sleep 1s'
-                    script {
-                        // Allow up to 3 retries 5 minutes each for the HIL test
-                        runCommand(3, 5, 'MINUTES', "HackRF Pro Test", hpro_test)
+                        runTest("Check Host", 'hpro_eut', './ci-scripts/test_host.sh')
+                        runTest("HackRF Pro HIL Test", 'hpro_tester hpro_eut', hpro_test)
                     }
                 }
             }
@@ -219,6 +162,18 @@ def runCommand(retries, time, unit, title, cmd) {
         } catch (Exception err) {
             echo "An unrelated error occurred: ${err.getMessage()}"
             throw err
+        }
+    }
+}
+
+def runTest(title, devices, cmd) {
+    script {
+        retry(3) {
+            // reset() retains it's own internal retries
+            reset({devices})
+            sh 'sleep 1s'
+            // run the test with 0 internal retries and 3 external retries to ensure resets between runs
+            runCommand(0, 5, 'MINUTES', {title}, {cmd})
         }
     }
 }
