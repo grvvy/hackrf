@@ -39,8 +39,8 @@ pipeline {
                 timeout(time: 20, unit: 'MINUTES')
             }
             steps {
-                runCommand("Install Host Tools", './ci-scripts/install_host.sh', 3, 1, 'MINUTE')
-                runCommand("Build HackRF One Firmware", './ci-scripts/build_firmware.sh HACKRF_ONE', 3, 1, 'MINUTE')
+                runCommand("Install Host Tools", './ci-scripts/install_host.sh', 3, 1, 'MINUTES')
+                runCommand("Build HackRF One Firmware", './ci-scripts/build_firmware.sh HACKRF_ONE', 3, 1, 'MINUTES')
                 lock('HIL_hubs') {
                     script {
                         allOff()
@@ -63,8 +63,8 @@ pipeline {
                 timeout(time: 20, unit: 'MINUTES')
             }
             steps {
-                runCommand("Install Host Tools", './ci-scripts/install_host.sh', 3, 1, 'MINUTE')
-                runCommand("Build Universal Firmware", './ci-scripts/build_firmware.sh UNIVERSAL', 3, 1, 'MINUTE')
+                runCommand("Install Host Tools", './ci-scripts/install_host.sh', 3, 1, 'MINUTES')
+                runCommand("Build Universal Firmware", './ci-scripts/build_firmware.sh UNIVERSAL', 3, 1, 'MINUTES')
                 lock('HIL_hubs') {
                     script {
                         allOff()
@@ -88,8 +88,8 @@ pipeline {
                 timeout(time: 20, unit: 'MINUTES')
             }
             steps {
-                runCommand("Install Host Tools", './ci-scripts/install_host.sh', 3, 1, 'MINUTE')
-                runCommand("Build Praline Firmware", './ci-scripts/build_firmware.sh PRALINE', 3, 1, 'MINUTE')
+                runCommand("Install Host Tools", './ci-scripts/install_host.sh', 3, 1, 'MINUTES')
+                runCommand("Build Praline Firmware", './ci-scripts/build_firmware.sh PRALINE', 3, 1, 'MINUTES')
                 lock('HIL_hubs') {
                     script {
                         allOff()
@@ -111,8 +111,8 @@ pipeline {
                 timeout(time: 20, unit: 'MINUTES')
             }
             steps {
-                runCommand("Install Host Tools", './ci-scripts/install_host.sh', 3, 1, 'MINUTE')
-                runCommand("Build Universal Firmware", './ci-scripts/build_firmware.sh UNIVERSAL', 3, 1, 'MINUTE')
+                runCommand("Install Host Tools", './ci-scripts/install_host.sh', 3, 1, 'MINUTES')
+                runCommand("Build Universal Firmware", './ci-scripts/build_firmware.sh UNIVERSAL', 3, 1, 'MINUTES')
                 lock('HIL_hubs') {
                     script {
                         allOff()
