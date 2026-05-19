@@ -167,13 +167,11 @@ def runCommand(title, cmd, retries, time, unit) {
 }
 
 def runTest(title, devices, cmd) {
-    script {
-        retry(3) {
-            // reset() retains it's own internal retries
-            reset({devices})
-            sh 'sleep 1s'
-            // run the test with 0 internal retries and 3 external retries to ensure resets between runs
-            runCommand({title}, {cmd}, 0, 5, 'MINUTES')
-        }
+    retry(3) {
+        // reset() retains it's own internal retries
+        reset({devices})
+        sh 'sleep 1s'
+        // run the test with 0 internal retries and 3 external retries to ensure resets between runs
+        runCommand({title}, {cmd}, 0, 5, 'MINUTES')
     }
 }
