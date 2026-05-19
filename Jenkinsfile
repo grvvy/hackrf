@@ -39,8 +39,8 @@ pipeline {
                 timeout(time: 20, unit: 'MINUTES')
             }
             steps {
-                runCommand(3, 1, 'MINUTE', "Install Host Tools", './ci-scripts/install_host.sh')
-                runCommand(3, 1, 'MINUTE', "Build HackRF One Firmware", './ci-scripts/build_firmware.sh HACKRF_ONE')
+                runCommand("Install Host Tools", './ci-scripts/install_host.sh', 3, 1, 'MINUTE')
+                runCommand("Build HackRF One Firmware", './ci-scripts/build_firmware.sh HACKRF_ONE', 3, 1, 'MINUTE')
                 lock('HIL_hubs') {
                     script {
                         allOff()
@@ -63,8 +63,8 @@ pipeline {
                 timeout(time: 20, unit: 'MINUTES')
             }
             steps {
-                runCommand(3, 1, 'MINUTE', "Install Host Tools", './ci-scripts/install_host.sh')
-                runCommand(3, 1, 'MINUTE', "Build Universal Firmware", './ci-scripts/build_firmware.sh UNIVERSAL')
+                runCommand("Install Host Tools", './ci-scripts/install_host.sh', 3, 1, 'MINUTE')
+                runCommand("Build Universal Firmware", './ci-scripts/build_firmware.sh UNIVERSAL', 3, 1, 'MINUTE')
                 lock('HIL_hubs') {
                     script {
                         allOff()
@@ -88,8 +88,8 @@ pipeline {
                 timeout(time: 20, unit: 'MINUTES')
             }
             steps {
-                runCommand(3, 1, 'MINUTE', "Install Host Tools", './ci-scripts/install_host.sh')
-                runCommand(3, 1, 'MINUTE', "Build Praline Firmware", './ci-scripts/build_firmware.sh PRALINE')
+                runCommand("Install Host Tools", './ci-scripts/install_host.sh', 3, 1, 'MINUTE')
+                runCommand("Build Praline Firmware", './ci-scripts/build_firmware.sh PRALINE', 3, 1, 'MINUTE')
                 lock('HIL_hubs') {
                     script {
                         allOff()
@@ -111,8 +111,8 @@ pipeline {
                 timeout(time: 20, unit: 'MINUTES')
             }
             steps {
-                runCommand(3, 1, 'MINUTE', "Install Host Tools", './ci-scripts/install_host.sh')
-                runCommand(3, 1, 'MINUTE', "Build Universal Firmware", './ci-scripts/build_firmware.sh UNIVERSAL')
+                runCommand("Install Host Tools", './ci-scripts/install_host.sh', 3, 1, 'MINUTE')
+                runCommand("Build Universal Firmware", './ci-scripts/build_firmware.sh UNIVERSAL', 3, 1, 'MINUTE')
                 lock('HIL_hubs') {
                     script {
                         allOff()
@@ -135,15 +135,15 @@ pipeline {
 
 def allOff() {
     // Allow up to 3 retries, 20 seconds each, for the USB hub port power server to respond appropriately
-    runCommand(3, 20, 'SECONDS', 'USB hub port power server command', "hubs all off")
+    runCommand('USB hub port power server command', "hubs all off", 3, 20, 'SECONDS')
 }
 
 def reset(devices) {
     // Allow up to 3 retries, 20 seconds each, for the USB hub port power server to respond appropriately
-    runCommand(3, 20, 'SECONDS', 'USB hub port power server command', "hubs ${devices} reset")
+    runCommand('USB hub port power server command', "hubs ${devices} reset", 3, 20, 'SECONDS')
 }
 
-def runCommand(retries, time, unit, title, cmd) {
+def runCommand(title, cmd, retries, time, unit) {
     retry(retries) {
         try {
             timeout(time: time, unit: unit) {
@@ -173,7 +173,7 @@ def runTest(title, devices, cmd) {
             reset({devices})
             sh 'sleep 1s'
             // run the test with 0 internal retries and 3 external retries to ensure resets between runs
-            runCommand(0, 5, 'MINUTES', {title}, {cmd})
+            runCommand({title}, {cmd}, 0, 5, 'MINUTES')
         }
     }
 }
