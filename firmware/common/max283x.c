@@ -28,6 +28,8 @@
 
 #include <libopencm3/lpc43xx/ssp.h>
 
+#include "adc.h"
+#include "delay.h"
 #include "fixed_point.h"
 #include "platform_detect.h"
 #include "platform_gpio.h"
@@ -328,4 +330,25 @@ void max283x_tx_calibration(max283x_driver_t* const drv)
 void max283x_rx_calibration(max283x_driver_t* const drv)
 {
 	PRALINE_ONLY(drv, max2831_rx_calibration(&drv->drv.max2831));
+}
+
+/* Get chip temperature. */
+int8_t max283x_temperature(max283x_driver_t* const drv)
+{
+	/* Switch to temperature sensor. */
+	CALL(drv, select_temperature);
+
+	/* Wait for output to settle. */
+	delay_ms(1);
+
+	/* Read temperature. */
+	uint16_t value = adc_read(1);
+
+	/* Convert to degrees C, using:
+	 * ADC 0 = 0V, ADC 1023 = 3.3V
+	 * Analog 0.35V = -40C, 1.6V = +85C
+	 * Offset adjusted empirically. */
+	const int32_t prescale = 3332, offset = 928500, divisor = 10000;
+
+	return ((value * prescale) - offset) / divisor;
 }
