@@ -55,7 +55,7 @@ static const uint16_t max2839_regs_default[MAX2839_NUM_REGS] = {
 	0x000,  /* 6 */
 	0x208,  /* 7 */
 	0x220,  /* 8:  data sheet says 0x220 but read 0x000 */
-	0x018,  /* 9 */
+	0x01a,  /* 9 */
 	0x00c,  /* 10 */
 	0x004,  /* 11: data sheet says 0x004 but read 0x000 */
 	0x24f,  /* 12 */
