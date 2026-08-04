@@ -4,7 +4,7 @@
 # Copyright (c) 2025 Great Scott Gadgets <info@greatscottgadgets.com>
 # SPDX-License-Identifier: BSD-3-Clause
 
-from amaranth import Elaboratable, Module, Instance, Signal, ClockSignal
+from amaranth import Elaboratable, Module, Instance, Signal, ClockSignal, Cat
 
 # References:
 # [1] LATTICE ICE™ Technology Library, Version 3.0, August, 2016
@@ -28,11 +28,11 @@ class SPIDeviceInterface(Elaboratable):
     def elaborate(self, platform):
         m = Module()
 
-        spi_adr  = Signal(8, init=0b1000)   # address
-        spi_dati = Signal(8)                # data input
+        spi_adr  = Signal(4, init=0b1000, reset_less=True)  # address
+        spi_dati = Signal(8, reset_less=True)               # data input
         spi_dato = Signal(8)                # data output
-        spi_rw   = Signal()                 # selects between read or write (high = write)
-        spi_stb  = Signal()                 # strobe must be asserted to start a read/write
+        spi_rw   = Signal(reset_less=True)  # selects between read or write (high = write)
+        spi_stb  = Signal(reset_less=True)  # strobe must be asserted to start a read/write
         spi_ack  = Signal()                 # ack that the transfer is done (read valid, write ack)
 
         # SB_SPI interface is documented in [1].
@@ -49,7 +49,7 @@ class SPIDeviceInterface(Elaboratable):
             "i_SBRWI":  spi_rw,
             "o_SBACKO": spi_ack,
         }
-        sb_spi_params |= { f"i_SBADRI{i}": spi_adr[i]  for i in range(8) }
+        sb_spi_params |= { f"i_SBADRI{i}": spi_adr[i]  for i in range(4) }
         sb_spi_params |= { f"i_SBDATI{i}": spi_dati[i] for i in range(8) }
         sb_spi_params |= { f"o_SBDATO{i}": spi_dato[i] for i in range(8) }
 
@@ -73,6 +73,7 @@ class SPIDeviceInterface(Elaboratable):
 
         # De-assert strobe signals unless explicitly asserted.
         m.d.sync += spi_stb.eq(0)
+        m.d.sync += spi_rw.eq(0)
         m.d.sync += self.word_in_stb.eq(0)
 
         with m.FSM():
@@ -87,7 +88,6 @@ class SPIDeviceInterface(Elaboratable):
                         spi_rw   .eq(1),
                     ]
                     with m.If(spi_ack):
-                        m.d.sync += spi_stb.eq(0)
                         if i+1 < len(registers_init):
                             m.next = f"INIT{i+1}"
                         else:
@@ -100,7 +100,6 @@ class SPIDeviceInterface(Elaboratable):
                     spi_rw  .eq(0),
                 ]
                 with m.If(spi_ack):
-                    m.d.sync += spi_stb.eq(0)
                     # bit 3 = RRDY, data is available to read
                     # bit 4 = TRDY, transmit data is empty
                     # bit 6 = BUSY, chip select is asserted (low)
@@ -119,7 +118,6 @@ class SPIDeviceInterface(Elaboratable):
                 ]
                 with m.If(spi_ack):
                     m.d.sync += [
-                        spi_stb          .eq(0),
                         self.word_in     .eq(spi_dato),
                         self.word_in_stb .eq(1),
                     ]
@@ -133,8 +131,11 @@ class SPIDeviceInterface(Elaboratable):
                     spi_rw   .eq(1),
                 ]
                 with m.If(spi_ack):
-                    m.d.sync += spi_stb.eq(0)
                     m.next = "WAIT"
+
+        with m.If(spi_ack):
+            m.d.sync += spi_stb.eq(0)
+            m.d.sync += spi_rw.eq(0)
 
         return m
 
