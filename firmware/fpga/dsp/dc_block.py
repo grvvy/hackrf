@@ -62,6 +62,12 @@ class DCBlock(wiring.Component):
         with m.If(self.input.ready & self.input.valid):
             m.d.comb += prng_en.eq(1)
 
+        def saturating_sub(a, b):
+            r = a - b
+            r_sat = Cat((~r[-1]).replicate(self.width-1), r[-1])
+            overflow = r[-1] ^ r[-2]  # sign bit of the result different from carry (top 2 bits)
+            return Mux(overflow, r_sat, r[:self.width].as_signed())
+
         # Per-channel processing.
         for c in range(self.num_channels):
 
@@ -79,11 +85,6 @@ class DCBlock(wiring.Component):
             # Generate unique dither pattern for each channel.
             m.d.sync += dither.eq(prng_bits.word_select(c, ratio))
 
-            def saturating_sub(a, b):
-                r = a - b
-                r_sat = Cat((~r[-1]).replicate(self.width-1), r[-1])
-                overflow = r[-1] ^ r[-2]  # sign bit of the result different from carry (top 2 bits)
-                return Mux(overflow, r_sat, r)
 
             with m.If(self.input.valid & self.input.ready):
 
