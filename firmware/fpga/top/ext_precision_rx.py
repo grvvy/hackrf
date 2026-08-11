@@ -61,7 +61,7 @@ class Top(Elaboratable):
 
         # NCO and mixer.
         m.submodules.nco = nco = NCO(phase_width=16, output_width=10, domain=adc_clk)
-        mixer = DomainRenamer(adc_clk)(ComplexMultiplier(IQSample(8), IQSample(10), IQSample(8), always_ready=True))
+        mixer = ComplexMultiplier(IQSample(8), IQSample(10), IQSample(8), always_ready=True, domain=adc_clk)
         mixer.input = mixer.a
         mixer.output = mixer.c
         m.d.comb += [
