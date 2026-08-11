@@ -6,7 +6,7 @@
 
 from math                   import ceil, log2
 
-from amaranth               import Module, Signal, Mux, DomainRenamer, ClockSignal, signed
+from amaranth               import Module, Signal, Mux, Cat, DomainRenamer, ClockSignal, signed
 from amaranth.lib           import wiring, stream, data, memory, fifo
 from amaranth.lib.wiring    import In, Out
 from amaranth.utils         import bits_for
@@ -488,25 +488,18 @@ class iCE40Multiplier(wiring.Component):
 
         def pipe(signal, length):
             pipe = [ signal ] + [ Signal.like(signal, name=f"{signal.name}_q{i}") for i in range(length) ]
-            for i in range(length):
-                m.d.sync += pipe[i+1].eq(pipe[i])
+            with m.If(self.ready_in):  # clock enable
+                m.d.sync += [ pipe[i+1].eq(pipe[i]) for i in range(length) ]
             return pipe
 
-        valid_v     = Signal()
-        m.d.comb += valid_v.eq(self.valid_in & self.ready_in)
-
         dsp_delay   = 3
-        valid_pipe  = pipe(valid_v, dsp_delay)
+        valid_pipe  = pipe(self.valid_in, dsp_delay)
 
         if self.p_width > 0:
             p_load_v    = Signal()
-            m.d.comb   += p_load_v.eq(self.p_load & valid_v)
-            p_pipe      = pipe(self.p, dsp_delay-1)
-            p_load_pipe = pipe(p_load_v, dsp_delay - 1)
-
-        # skid buffer
-        if not self.always_ready:
-            m.submodules.out_fifo = out_fifo = fifo.SyncFIFOBuffered(width=self.o_width, depth=dsp_delay+2)
+            m.d.comb   += p_load_v.eq(self.p_load & self.valid_in)
+            p_pipe      = pipe(self.p, 2)
+            p_load_pipe = pipe(p_load_v, 2)
         
         m.d.comb += self.ready_in.eq(~self.valid_out | self.ready_out)
 
@@ -522,7 +515,7 @@ class iCE40Multiplier(wiring.Component):
             TOPOUTPUT_SELECT=1,
             TOPADDSUB_LOWERINPUT=2,
             TOPADDSUB_UPPERINPUT=1,
-            TOPADDSUB_CARRYSELECT=3,
+            TOPADDSUB_CARRYSELECT=2,
             BOTOUTPUT_SELECT=1,
             BOTADDSUB_LOWERINPUT=2,
             BOTADDSUB_UPPERINPUT=1,
@@ -534,38 +527,26 @@ class iCE40Multiplier(wiring.Component):
 
         m.d.comb += [
             # Inputs.
-            mac.CLK         .eq(ClockSignal("sync")),
-            mac.CE          .eq(1),
-            mac.C.as_signed().eq(Mux(p_load_pipe[2], p_pipe[2][16:], mac.O[16:]) if self.p_width > 0 else 0),
-            mac.A.as_signed().eq(self.a),
-            mac.B.as_signed().eq(self.b),
-            mac.D.as_signed().eq(Mux(p_load_pipe[2], p_pipe[2][:16], mac.O[:16]) if self.p_width > 0 else 0),
-            mac.AHOLD       .eq(~valid_pipe[0]),  # 0: load
-            mac.BHOLD       .eq(~valid_pipe[0]),
-            mac.CHOLD       .eq(0),
-            mac.DHOLD       .eq(0),
-            mac.OHOLDTOP    .eq(~valid_pipe[2]),
-            mac.OHOLDBOT    .eq(~valid_pipe[2]),
-            mac.ADDSUBTOP   .eq(0),
-            mac.ADDSUBBOT   .eq(0),
-            mac.OLOADTOP    .eq(0),
-            mac.OLOADBOT    .eq(0),
-        ]
+            mac.CLK                         .eq(ClockSignal("sync")),
+            mac.CE                          .eq(self.ready_in),
+            mac.A.as_signed()               .eq(self.a),
+            mac.B.as_signed()               .eq(self.b),
+            Cat(mac.D, mac.C).as_signed()   .eq(Mux(p_load_pipe[2], p_pipe[2], mac.O) if self.p_width > 0 else 0),
+            mac.AHOLD                       .eq(~valid_pipe[0]),  # 0: load
+            mac.BHOLD                       .eq(~valid_pipe[0]),
+            mac.CHOLD                       .eq(0),
+            mac.DHOLD                       .eq(0),
+            mac.OHOLDTOP                    .eq(~valid_pipe[2]),
+            mac.OHOLDBOT                    .eq(~valid_pipe[2]),
+            mac.ADDSUBTOP                   .eq(0),
+            mac.ADDSUBBOT                   .eq(0),
+            mac.OLOADTOP                    .eq(0),
+            mac.OLOADBOT                    .eq(0),
 
-        if not self.always_ready:
-            m.d.comb += [
-                out_fifo.w_data.eq(mac.O),
-                out_fifo.w_en.eq(valid_pipe[dsp_delay]),
-                
-                self.o.eq(out_fifo.r_data),
-                self.valid_out.eq(out_fifo.r_rdy),
-                out_fifo.r_en.eq(self.ready_out),
-            ]
-        else:
-            m.d.comb += [                
-                self.o.eq(mac.O),
-                self.valid_out.eq(valid_pipe[dsp_delay]),
-            ]
+            # Outputs.
+            self.o                          .eq(mac.O),
+            self.valid_out                  .eq(valid_pipe[dsp_delay]),
+        ]
 
         return m
 
