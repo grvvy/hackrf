@@ -132,25 +132,20 @@ class HalfBandInterpolatorMAC16(wiring.Component):
         arm1_taps = taps[1::2]
         delay     = arm1_taps.index(1)
 
-        # Arms
-        m.submodules.fir = fir = FIRFilterMAC16(arm0_taps, shape=self.data_shape, shape_out=self.shape_out, overclock_rate=self.overclock_rate, always_ready=always_ready, num_channels=self.num_channels)
-        m.submodules.dly = dly = Delay(delay, shape=self.data_shape, always_ready=True, num_channels=self.num_channels)
-        # Buffer samples due to the delay introduced in FIRFilterMAC16.
+        # FIR filter.
+        m.submodules.fir = fir = FIRFilterMAC16(arm0_taps, shape=self.data_shape, shape_out=self.shape_out, overclock_rate=self.overclock_rate, always_ready=always_ready, num_channels=self.num_channels, delayed_port=delay)
+
+        # Buffer delayed samples due to the delay introduced in FIRFilterMAC16.
         m.submodules.dly_fifo = dly_fifo = fifo.SyncFIFOBuffered(width=self.num_channels*self.data_shape.as_shape().width, depth=self.overclock_rate+1)
-        
+        delay_valid = Signal()
+        m.d.sync += delay_valid.eq(self.input.valid & self.input.ready)
         m.d.comb += [
-            dly_fifo.w_data.eq(dly.output.p),
-            dly_fifo.w_en.eq(dly.output.valid),
+            dly_fifo.w_data.eq(fir.input_delayed),
+            dly_fifo.w_en.eq(delay_valid),
         ]
 
         # Input
-        m.d.comb += fir.input.payload.eq(self.input.payload)
-        m.d.comb += fir.input.valid.eq(self.input.valid & dly.input.ready)
-        m.d.comb += dly.input.payload.eq(self.input.payload)
-        m.d.comb += dly.input.valid.eq(self.input.valid & fir.input.ready)
-
-        if not self.input.signature.always_ready:
-            m.d.comb += self.input.ready.eq(fir.input.ready & dly.input.ready)
+        wiring.connect(m, wiring.flipped(self.input), fir.input)
 
         # Output
 
@@ -185,7 +180,7 @@ class HalfBandInterpolatorMAC16(wiring.Component):
 
 class FIRFilterMAC16(wiring.Component):
 
-    def __init__(self, taps, shape, shape_out=None, always_ready=False, overclock_rate=8, num_channels=1, carry=None, delayed_port=False):
+    def __init__(self, taps, shape, shape_out=None, always_ready=False, overclock_rate=8, num_channels=1, carry=None, delayed_port=None):
         self.carry = carry
         self.taps = list(taps)
         self.shape = shape
@@ -332,6 +327,10 @@ class FIRFilterMAC16(wiring.Component):
 
         # Samples window + sum_carry capture.
         window, window_valid, filters_ready, sum_carry_q = self._build_window(m)
+
+        # Connect delayed copy of the input if requested.
+        if self.delayed_port is not None:
+            m.d.comb += self.input_delayed.eq(window[self.delayed_port])
 
         # Symmetric folding (if applicable). This is done combinatorially.
         window, taps = self._fold_symmetric(m, window, self.taps)
