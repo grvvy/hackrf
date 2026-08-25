@@ -492,8 +492,7 @@ class SerialMAC16(wiring.Component):
 
         m.submodules.dsp = dsp = iCE40Multiplier(
             o_width=shape_out.as_shape().width,
-            p_width=shape_out.as_shape().width,
-            always_ready=self.always_ready)
+            p_width=shape_out.as_shape().width)
 
         valid_cnt = Signal(depth, init=1)
         mult_cnt  = Signal(depth, init=1)
@@ -521,7 +520,7 @@ class SerialMAC16(wiring.Component):
 
 class iCE40Multiplier(wiring.Component):
 
-    def __init__(self, a_width=16, b_width=16, p_width=32, o_width=32, always_ready=False):
+    def __init__(self, a_width=16, b_width=16, p_width=32, o_width=32):
         signature = {
             "a": In(signed(a_width)),
             "b": In(signed(b_width)),
@@ -537,7 +536,6 @@ class iCE40Multiplier(wiring.Component):
                 "p_load": In(1),
             })
         super().__init__(signature)
-        self.always_ready = always_ready
         self.p_width = p_width
    
     def elaborate(self, platform):
