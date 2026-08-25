@@ -4,7 +4,7 @@
 # Copyright (c) 2025 Great Scott Gadgets <info@greatscottgadgets.com>
 # SPDX-License-Identifier: BSD-3-Clause
 
-from amaranth import Elaboratable, Module, Instance, Signal, ClockSignal, Cat
+from amaranth import Elaboratable, Module, Instance, Signal, ClockSignal, C, ResetInserter
 
 # References:
 # [1] LATTICE ICE™ Technology Library, Version 3.0, August, 2016
@@ -12,9 +12,10 @@ from amaranth import Elaboratable, Module, Instance, Signal, ClockSignal, Cat
 
 class SPIDeviceInterface(Elaboratable):
     
-    def __init__(self, port):
+    def __init__(self, port, position="right"):
         # I/O port.
         self.port        = port
+        self.position    = position
 
         # Data I/O.
         self.word_in     = Signal(8)
@@ -52,6 +53,11 @@ class SPIDeviceInterface(Elaboratable):
         sb_spi_params |= { f"i_SBADRI{i}": spi_adr[i]  for i in range(4) }
         sb_spi_params |= { f"i_SBDATI{i}": spi_dati[i] for i in range(8) }
         sb_spi_params |= { f"o_SBDATO{i}": spi_dato[i] for i in range(8) }
+        
+        # Phyisical placement of the SB_SPI core: left or right.
+        adri_top = C(0b0010 if self.position == "right" else 0, 4)
+        sb_spi_params["p_BUS_ADDR74"] = f"0b{adri_top.value:04b}"
+        sb_spi_params |= { f"i_SBADRI{i+4}": adri_top[i] for i in range(4) }
 
         m.submodules.sb_spi = sb_spi = Instance("SB_SPI", **sb_spi_params)
         
@@ -71,10 +77,8 @@ class SPIDeviceInterface(Elaboratable):
             SPI_ADDR_SPICR1: 0b10000000,  # Enable SPI
         }
 
-        # De-assert strobe signals unless explicitly asserted.
-        m.d.sync += spi_stb.eq(0)
-        m.d.sync += spi_rw.eq(0)
-        m.d.sync += self.word_in_stb.eq(0)
+        m.d.comb += self.word_in.eq(spi_dato)
+        m.d.sync += self.busy.eq(self.port.cs.i)
 
         with m.FSM():
 
@@ -104,7 +108,6 @@ class SPIDeviceInterface(Elaboratable):
                     # bit 4 = TRDY, transmit data is empty
                     # bit 6 = BUSY, chip select is asserted (low)
                     # bit 7 = TIP, transfer in progress
-                    m.d.sync += self.busy.eq(spi_dato[6])
                     with m.If(spi_dato[7] & spi_dato[4]):
                         m.next = "SPI_TRANSMIT"
                     with m.Elif(spi_dato[3]):
@@ -117,10 +120,7 @@ class SPIDeviceInterface(Elaboratable):
                     spi_rw  .eq(0),
                 ]
                 with m.If(spi_ack):
-                    m.d.sync += [
-                        self.word_in     .eq(spi_dato),
-                        self.word_in_stb .eq(1),
-                    ]
+                    m.d.comb += self.word_in_stb.eq(1)
                     m.next = "WAIT"
                         
             with m.State("SPI_TRANSMIT"):
@@ -158,29 +158,26 @@ class SPICommandInterface(Elaboratable):
         self.interface      = SPIDeviceInterface(port)
 
         # Command I/O.
-        self.command        = Signal(8)
+        self.command        = Signal(8, reset_less=True)
         self.command_ready  = Signal()
 
         # Data I/O
-        self.word_received  = Signal(8)
-        self.word_to_send   = Signal.like(self.word_received)
+        self.word_received  = Signal(8, reset_less=True)
         self.word_complete  = Signal()
 
+        self.word_to_send   = Signal.like(self.word_received)
 
     def elaborate(self, platform):
 
-        m = Module()
+        interface = self.interface
 
-        # Attach our SPI interface.
-        m.submodules.interface = interface = self.interface
+        m = Module()
 
         # De-assert our control signals unless explicitly asserted.
         m.d.sync += [
             self.command_ready.eq(0),
-            self.word_complete.eq(0)
+            self.word_complete.eq(0),
         ]
-
-        m.d.comb += interface.word_out.eq(self.word_to_send)
 
         with m.FSM():
 
@@ -191,10 +188,6 @@ class SPICommandInterface(Elaboratable):
                         self.command_ready  .eq(1),
                     ]
                     m.next = "DATA_PHASE"
-                
-                # Do not advance if chip select is deasserted.
-                with m.If(~interface.busy):
-                    m.next = "COMMAND_PHASE"
 
             with m.State("DATA_PHASE"):
                 with m.If(interface.word_in_stb):
@@ -202,16 +195,22 @@ class SPICommandInterface(Elaboratable):
                     m.d.sync += self.word_complete.eq(1)
                     m.next = "DUMMY_PHASE"
 
-                # Do not advance if chip select is deasserted.
-                with m.If(~interface.busy):
-                    m.next = "COMMAND_PHASE"
-
             # The SB_SPI block always returns 0xFF for the second byte, so at least one
             # dummy byte must be added to retrieve valid data. This behavior is shown in
             # Figure 22-16, "Minimally Specified SPI Transaction Example," from [2].
             with m.State("DUMMY_PHASE"):
-                with m.If(~interface.busy):
-                    m.next = "COMMAND_PHASE"
+                pass
+
+        # Create a different top module that contains the FSM and the 
+        # low-level SPI interface. This lets us reset the FSM using 
+        # state from the lower layer (`busy`).
+        fsm = m
+        m = Module()
+        m.submodules.interface = interface
+        # Do not advance / reset FSM state if chip select is deasserted.
+        m.submodules.fsm = ResetInserter(~interface.busy)(fsm)
+
+        m.d.comb += interface.word_out.eq(self.word_to_send)
 
         return m
 
