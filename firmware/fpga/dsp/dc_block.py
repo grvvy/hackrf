@@ -38,10 +38,8 @@ class DCBlock(wiring.Component):
         m = Module()
 
         # Resync control signaling.
-        enable      = Signal()
-        m.d.sync += [
-            enable      .eq(self.enable),
-        ]
+        enable    = Signal()
+        m.d.sync += enable.eq(self.enable)
 
         # Fixed-point configuration.
         ratio         = self.ratio
@@ -50,7 +48,7 @@ class DCBlock(wiring.Component):
         
         # Shared PRNG for all channels.
         prng_en = Signal()
-        m.submodules.prng = prng = EnableInserter(prng_en)(Xoroshiro64AOX())
+        m.submodules.prng = prng = EnableInserter(prng_en)(GaloisLFSR32())
         prng_bits = prng.output
 
         # Common signaling.
@@ -85,7 +83,6 @@ class DCBlock(wiring.Component):
             # Generate unique dither pattern for each channel.
             m.d.sync += dither.eq(prng_bits.word_select(c, ratio))
 
-
             with m.If(self.input.valid & self.input.ready):
 
                 m.d.sync += [
@@ -110,33 +107,26 @@ class DCBlock(wiring.Component):
         return m
 
 
-class Xoroshiro64AOX(wiring.Component):
-    """ Variant of xoroshiro64 for faster hardware implementation """
-    """ AOX mod from 'A Fast Hardware Pseudorandom Number Generator Based on xoroshiro128' """
+class GaloisLFSR32(wiring.Component):
     output: Out(32)
 
-    def __init__(self, s0=1, s1=0):
-        self.s0 = s0
-        self.s1 = s1
+    def __init__(self, poly=0x80200003, seed=1):
+        assert poly != 0
+        assert seed != 0
+        self.poly = poly
+        self.seed = seed
         super().__init__()
 
     def elaborate(self, platform):
         m = Module()
 
-        s0 = Signal(32, init=self.s0)
-        s1 = Signal(32, init=self.s1)
+        state    = Signal(32, init=self.seed)
+        feedback = state[0]
 
-        a = 26
-        b = 9
-        c = 13
-
-        sx = Signal(32)
-        sa = Signal(32)
-        m.d.comb += sx.eq(s0 ^ s1)
-        m.d.comb += sa.eq(s0 & s1)
-
-        m.d.sync += s0.eq(s0.rotate_left(a) ^ sx ^ (sx << b))
-        m.d.sync += s1.eq(sx.rotate_left(c))
-        m.d.sync += self.output.eq(sx ^ (sa.rotate_left(1) | sa.rotate_left(2)))
+        next_state = Signal.like(state)
+        m.d.comb += next_state.eq((state >> 1) ^ Mux(feedback, self.poly, 0))
+        
+        m.d.sync += state.eq(next_state)
+        m.d.comb += self.output.eq(state)
 
         return m
