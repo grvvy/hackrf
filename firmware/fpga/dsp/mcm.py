@@ -71,9 +71,8 @@ class ShiftAddMCM(wiring.Component):
             for term in unique_terms:
                 result = None
 
-                for digit_key in term_digits[term]:
-                    node = get_leaf_node(*digit_key)
-                    result = node if result is None else (result + node)
+                nodes = [ get_leaf_node(*digit_key) for digit_key in term_digits[term] ]
+                result = balanced_sum(nodes)
 
                 if result is None:
                     result = 0
@@ -87,6 +86,17 @@ class ShiftAddMCM(wiring.Component):
                     m.d.comb += self.output.p[c][f"{index}"][shift:].eq(result_q)
 
         return m
+
+
+def balanced_sum(nodes):
+    if len(nodes) == 0:
+        return 0
+    while len(nodes) > 1:
+        nodes = [
+            nodes[i] + nodes[i + 1] if i + 1 < len(nodes) else nodes[i]
+            for i in range(0, len(nodes), 2)
+        ]
+    return nodes[0]
 
 
 def make_odd(n):
