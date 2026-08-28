@@ -217,8 +217,7 @@ class FIRFilterMAC16(wiring.Component):
     def _build_window(self, m):
         taps          = self.taps
         window_depth  = len(taps)
-        window        = [Signal.like(self.input.p, name=f"window_{i}")
-                         for i in range(window_depth)]
+        window        = Signal(data.ArrayLayout(self.input.p.shape(), window_depth))
 
         window_valid  = Signal()
         input_ready   = Signal()
@@ -254,11 +253,8 @@ class FIRFilterMAC16(wiring.Component):
         odd_symmetric = (len(taps) % 2) == 1
         new_len       = len(taps) // 2 + (1 if odd_symmetric else 0)
 
-        new_window = [
-            Signal(data.ArrayLayout(sum_shape, self.num_channels),
-                   name=f"window_sym_{i}")
-            for i in range(new_len)
-        ]
+        new_window = Signal(data.ArrayLayout(
+            data.ArrayLayout(sum_shape, self.num_channels), new_len))
 
         # pre-sum symmetric pairs
         for i in range(new_len - (1 if odd_symmetric else 0)):
@@ -294,31 +290,27 @@ class FIRFilterMAC16(wiring.Component):
             window_slice = window[i * overclock_factor:(i + 1) * overclock_factor]
             carry        = None if i > 0 else self.carry
 
-            block_channels = []
-            for c in range(self.num_channels):
+            dsp = SerialMAC16(
+                taps=taps_slice,
+                shape=window_slice[0][0].shape(),  # element shape
+                carry=carry,
+                always_ready=self.always_ready,
+                num_channels=self.num_channels,
+            )
 
-                dsp = SerialMAC16(
-                    taps=taps_slice,
-                    shape=window_slice[0][0].shape(),  # element shape
-                    carry=carry,
-                    always_ready=self.always_ready,
-                )
+            # Connect window into this MAC16.
+            for j, sample in enumerate(window_slice):
+                m.d.comb += dsp.input.p[j].eq(sample)
+            m.d.comb += dsp.input.valid.eq(window_valid)
 
-                # Connect window into this MAC16.
-                for j, sample in enumerate(window_slice):
-                    m.d.comb += dsp.input.p[j].eq(sample[c])
-                m.d.comb += dsp.input.valid.eq(window_valid)
+            # first block drives filters_ready and captures carry if any
+            if i == 0:
+                m.d.comb += filters_ready.eq(dsp.input.ready)
+                if sum_carry_q is not None:
+                    m.d.comb += dsp.sum_carry.eq(sum_carry_q)
 
-                # first block drives filters_ready and captures carry if any
-                if i == 0:
-                    if c == 0:
-                        m.d.comb += filters_ready.eq(dsp.input.ready)
-                    if sum_carry_q is not None:
-                        m.d.comb += dsp.sum_carry.eq(sum_carry_q[c])
-
-                block_channels.append(dsp)
-                m.submodules[f"dsp_{i}_{c}"] = dsp
-            dsp_blocks.append(block_channels)
+            m.submodules[f"dsp_{i}"] = dsp
+            dsp_blocks.append(dsp)
 
         return dsp_blocks
 
@@ -355,28 +347,23 @@ class FIRFilterMAC16(wiring.Component):
         if len(dsp_blocks) == 1:
             # There's only 1 DSP block per channel: wire directly.
             block = dsp_blocks[0]
-            m.d.comb += fir_output.valid.eq(block[0].output.valid)
-            for c, blk_chan in enumerate(block):
-                m.d.comb += fir_output.payload[c].eq(blk_chan.output.p)
-                if not blk_chan.output.signature.always_ready:
-                    m.d.comb += blk_chan.output.ready.eq(fir_output.ready)
+            m.d.comb += fir_output.valid.eq(block.output.valid)
+            m.d.comb += fir_output.p.eq(block.output.p)
+            if not block.output.signature.always_ready:
+                m.d.comb += block.output.ready.eq(fir_output.ready)
         else:
             # Add results of the individual DSP blocks.
             advance = Signal()
             
-            chan_terms = [ [] for _ in range(self.num_channels) ]
-            for blocks in dsp_blocks:
-                for c, blk_chan in enumerate(blocks):
-                    if not blk_chan.output.signature.always_ready:
-                        m.d.comb += blk_chan.output.ready.eq(advance)
-                    chan_terms[c].append(blk_chan.output.p)
-
             first = dsp_blocks[0]
             with m.If(~fir_output.valid | fir_output.ready):
-                m.d.sync += fir_output.valid.eq(first[0].output.valid)
+                m.d.sync += fir_output.valid.eq(first.output.valid)
                 m.d.comb += advance.eq(1)
+                for block in dsp_blocks:
+                    if not block.output.signature.always_ready:
+                        m.d.comb += block.output.ready.eq(advance)
                 for c in range(self.num_channels):
-                    m.d.sync += fir_output.payload[c].eq(sum(chan_terms[c]))
+                    m.d.sync += fir_output.p[c].eq(sum(block.output.p[c] for block in dsp_blocks))
 
         # Perform rounding and saturation when needed.
         last_output = fir_output
@@ -392,7 +379,7 @@ class FIRFilterMAC16(wiring.Component):
 
 class SerialMAC16(wiring.Component):
 
-    def __init__(self, taps, shape, shape_out=None, taps_shape=None, carry=None, always_ready=False):
+    def __init__(self, taps, shape, shape_out=None, taps_shape=None, carry=None, num_channels=1, always_ready=False):
         assert shape.as_shape().width <= 16, f"DSP slice inputs have a maximum width of 16 bit. {shape} {shape.as_shape().width}"
 
         self.carry = carry
@@ -402,17 +389,23 @@ class SerialMAC16(wiring.Component):
         if shape_out is None:
             shape_out = FIRFilter.compute_output_shape(shape, taps, add_tap=carry)
         self.shape_out = shape_out
+        self.num_channels = num_channels
         self.always_ready = always_ready
         signature = {
-            "input":            In(stream.Signature(data.ArrayLayout(shape, len(taps)), always_ready=always_ready)),
-            "output":           Out(stream.Signature(shape_out, always_ready=always_ready)),
+            "input":            In(stream.Signature(data.ArrayLayout(
+                data.ArrayLayout(shape, num_channels),
+                len(taps)
+            ), always_ready=always_ready)),
+            "output":           Out(stream.Signature(
+                data.ArrayLayout(shape_out, num_channels),
+            always_ready=always_ready)),
         }
         if carry is not None:
             signature.update({
-                "sum_carry": In(carry)
+                "sum_carry": In(data.ArrayLayout(carry, num_channels))
             })
         else:
-            self.sum_carry = 0
+            self.sum_carry = [0]*num_channels
         super().__init__(signature)
 
     def taps_shape(self):
@@ -455,7 +448,7 @@ class SerialMAC16(wiring.Component):
             m.d.comb += self.input.ready.eq(input_ready)
 
         # Register inputs (valid, sample from window).
-        dsp_a = Signal(self.shape)
+        dsp_a = Signal(data.ArrayLayout(self.shape, self.num_channels))
         with m.If(dsp_ready):
             m.d.sync += dsp_valid.eq(self.input.valid | active)
             with m.If(self.input.valid | active):
@@ -488,31 +481,38 @@ class SerialMAC16(wiring.Component):
             with m.If(input_ready):
                 m.d.sync += sum_carry_q.eq(self.sum_carry)
         else:
-            sum_carry_q = 0
-
-        m.submodules.dsp = dsp = iCE40Multiplier(
-            o_width=shape_out.as_shape().width,
-            p_width=shape_out.as_shape().width)
+            sum_carry_q = self.sum_carry
 
         valid_cnt = Signal(depth, init=1)
         mult_cnt  = Signal(depth, init=1)
-        m.d.comb += [
-            dsp.a               .eq(dsp_a),
-            dsp.b               .eq(coeff_rd.data),
-            shape_out(dsp.p)    .eq(sum_carry_q),
-            dsp.valid_in        .eq(dsp_valid),
-            dsp_ready           .eq(dsp.ready_in),
-            dsp.p_load          .eq(mult_cnt[0]),
-            self.output.p       .eq(shape_out(dsp.o)),
-            self.output.valid   .eq(dsp.valid_out & valid_cnt[-1]),
-            dsp.ready_out       .eq(self.output.ready | ~valid_cnt[-1]),
-        ]
+
+        for c in range(self.num_channels):
+            m.submodules[f"dsp_c{c}"] = dsp = iCE40Multiplier(
+                o_width=shape_out.as_shape().width,
+                p_width=shape_out.as_shape().width)
+
+            m.d.comb += [
+                dsp.a               .eq(dsp_a[c]),
+                dsp.b               .eq(coeff_rd.data),
+                shape_out(dsp.p)    .eq(sum_carry_q[c]),
+                dsp.valid_in        .eq(dsp_valid),
+                ####dsp_ready           .eq(dsp.ready_in),
+                dsp.p_load          .eq(mult_cnt[0]),
+                self.output.p[c]    .eq(shape_out(dsp.o)),
+                ####self.output.valid   .eq(dsp.valid_out & valid_cnt[-1]),
+                dsp.ready_out       .eq(self.output.ready | ~valid_cnt[-1]),
+            ]
+            if c == 0:
+                m.d.comb += [
+                    dsp_ready.eq(dsp.ready_in),
+                    self.output.valid.eq(dsp.valid_out & valid_cnt[-1]),
+                ]
         
-        # Multiplier input and output counters.
-        with m.If(dsp.valid_in & dsp.ready_in):
-            m.d.sync += mult_cnt.eq(mult_cnt.rotate_left(1))
-        with m.If(dsp.valid_out & dsp.ready_out):
-            m.d.sync += valid_cnt.eq(valid_cnt.rotate_left(1))
+                # Multiplier input and output counters.
+                with m.If(dsp.valid_in & dsp.ready_in):
+                    m.d.sync += mult_cnt.eq(mult_cnt.rotate_left(1))
+                with m.If(dsp.valid_out & dsp.ready_out):
+                    m.d.sync += valid_cnt.eq(valid_cnt.rotate_left(1))
 
         return m
 
