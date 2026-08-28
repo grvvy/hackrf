@@ -6,15 +6,15 @@
 
 from math                   import ceil, log2
 
-from amaranth               import Module, Signal, Mux, Cat, DomainRenamer, ClockSignal, signed
+from amaranth               import Module, Signal, Mux, Cat, DomainRenamer, ClockSignal, signed, unsigned
 from amaranth.lib           import wiring, stream, data, memory, fifo
 from amaranth.lib.wiring    import In, Out
-from amaranth.utils         import bits_for
+from amaranth.utils         import ceil_log2
 
 from amaranth_future        import fixed
 
 from dsp.sb_mac16           import SB_MAC16
-from dsp.fir                import Delay
+from dsp.fir                import FIRFilter, Delay
 
 
 class HalfBandDecimatorMAC16(wiring.Component):
@@ -24,7 +24,7 @@ class HalfBandDecimatorMAC16(wiring.Component):
         self.taps = taps
         self.data_shape = data_shape
         if shape_out is None:
-            shape_out = data_shape
+            shape_out = FIRFilter.compute_output_shape(data_shape, taps)
         self.shape_out = shape_out
         self.always_ready = always_ready
         self.overclock_rate = overclock_rate
@@ -50,7 +50,9 @@ class HalfBandDecimatorMAC16(wiring.Component):
         delay    = dly_taps.index(1) - 1
 
         # Arms
-        m.submodules.fir = fir = FIRFilterMAC16(fir_taps, shape=self.data_shape, overclock_rate=2*self.overclock_rate, always_ready=always_ready, num_channels=2, carry=self.data_shape)
+        fir_shape_out = (self.output.p[0] << 1).shape()
+        m.submodules.fir = fir = FIRFilterMAC16(fir_taps, shape=self.data_shape, shape_out=fir_shape_out, 
+            overclock_rate=2*self.overclock_rate, always_ready=always_ready, num_channels=2, carry=self.data_shape)
         m.submodules.dly = dly = Delay(delay, shape=self.data_shape, always_ready=always_ready, num_channels=2)
 
         # Input switching.
@@ -73,7 +75,7 @@ class HalfBandDecimatorMAC16(wiring.Component):
         # 
         for c in range(2):
             m.d.comb += [
-                fir.sum_carry[c]   .eq(dly.output.p[c]),  # TODO: optimize shape?
+                fir.sum_carry[c]   .eq(dly.output.p[c]),
                 fir.input.p[c]     .eq(self.input.p[c]),
             ]
         m.d.comb += fir.input.valid .eq(self.input.valid & odd)
@@ -85,8 +87,8 @@ class HalfBandDecimatorMAC16(wiring.Component):
                 m.d.comb += fir.output.ready.eq(1)
             m.d.sync += self.output.valid.eq(fir.output.valid)
             with m.If(fir.output.valid):
-                m.d.sync += self.output.p[0].eq(fir.output.p[0] * fixed.Const(0.5))
-                m.d.sync += self.output.p[1].eq(fir.output.p[1] * fixed.Const(0.5))
+                m.d.sync += self.output.p[0].eq(fir.output.p[0] >> 1)
+                m.d.sync += self.output.p[1].eq(fir.output.p[1] >> 1)
 
         if self._domain != "sync":
             m = DomainRenamer(self._domain)(m)
@@ -101,8 +103,9 @@ class HalfBandInterpolatorMAC16(wiring.Component):
         assert midtap == 0.5
         self.taps = taps
         self.data_shape = data_shape
+        self.full_shape = FIRFilter.compute_output_shape(data_shape, [ 2 * tap for tap in taps[0::2]])
         if shape_out is None:
-            shape_out = data_shape
+            shape_out = self.full_shape
         self.shape_out = shape_out
         self.always_ready = always_ready
         self._domain = domain
@@ -131,19 +134,14 @@ class HalfBandInterpolatorMAC16(wiring.Component):
 
         # Arms
         m.submodules.fir = fir = FIRFilterMAC16(arm0_taps, shape=self.data_shape, shape_out=self.shape_out, overclock_rate=self.overclock_rate, always_ready=always_ready, num_channels=self.num_channels)
-        m.submodules.dly = dly = Delay(delay, shape=self.data_shape, always_ready=always_ready, num_channels=self.num_channels)
+        m.submodules.dly = dly = Delay(delay, shape=self.data_shape, always_ready=True, num_channels=self.num_channels)
+        # Buffer samples due to the delay introduced in FIRFilterMAC16.
         m.submodules.dly_fifo = dly_fifo = fifo.SyncFIFOBuffered(width=self.num_channels*self.data_shape.as_shape().width, depth=self.overclock_rate+1)
         
         m.d.comb += [
             dly_fifo.w_data.eq(dly.output.p),
             dly_fifo.w_en.eq(dly.output.valid),
         ]
-        if not dly.output.signature.always_ready:
-            m.d.comb += dly.output.ready.eq(dly_fifo.w_rdy)
-
-        #busy = Signal()
-        #with m.If(fir.input.valid & fir.input.ready):
-        #    m.d.sync += busy.eq(1)
 
         # Input
         m.d.comb += fir.input.payload.eq(self.input.payload)
@@ -159,9 +157,6 @@ class HalfBandInterpolatorMAC16(wiring.Component):
         # Arm index selection: switch after every delivered sample
         arm_index = Signal()
 
-        #delayed = Signal.like(fir.input_delayed)
-        #with m.If(fir.output.valid & fir.output.ready):
-        #    m.d.sync += delayed.eq(fir.input_delayed)
         r_data_cast = data.ArrayLayout(self.data_shape, self.num_channels)(dly_fifo.r_data)
 
         with m.If(~self.output.valid | self.output.ready):
@@ -194,8 +189,10 @@ class FIRFilterMAC16(wiring.Component):
         self.carry = carry
         self.taps = list(taps)
         self.shape = shape
+        self.full_shape = FIRFilter.compute_output_shape(self.shape, self.taps, carry)
         if shape_out is None:
-            shape_out = self.compute_output_shape()
+            shape_out = self.full_shape
+        self.saturate = self.full_shape.i_bits > shape_out.i_bits
         self.shape_out = shape_out
         self.num_channels = num_channels
         self.always_ready = always_ready
@@ -222,119 +219,174 @@ class FIRFilterMAC16(wiring.Component):
             })
         super().__init__(signature)
 
-    def taps_shape(self, taps=None):
-        taps            = taps or self.taps
-        taps_as_ratios  = [tap.as_integer_ratio() for tap in taps]
-        f_width         = bits_for(max(tap[1] for tap in taps_as_ratios)) - 1
-        i_width         = max(0, bits_for(max(abs(tap[0]) for tap in taps_as_ratios)) - f_width)
-        return fixed.Shape(i_width, f_width, signed=any(tap < 0 for tap in taps))
+    def _build_window(self, m):
+        taps          = self.taps
+        window_depth  = len(taps)
+        window        = [Signal.like(self.input.p, name=f"window_{i}")
+                         for i in range(window_depth)]
 
-    def compute_output_shape(self):
-        taps_shape = self.taps_shape()
-        signed     = self.shape.signed | taps_shape.signed
-        f_width    = self.shape.f_width + taps_shape.f_width
-        filter_gain = ceil(log2(sum(self.taps)))
-        i_width    = max(0, self.shape.as_shape().width + taps_shape.as_shape().width - signed - f_width + filter_gain)
-        if self.carry is not None:
-            f_width = max(f_width, self.carry.f_width)
-            i_width = max(i_width, self.carry.i_width) + 1
-        shape_out = fixed.Shape(i_width, f_width, signed=signed)
-        return shape_out
-
-    def elaborate(self, platform):
-        m = Module()
-
-        # Build filter out of SerialMAC16 blocks.
-        overclock_factor = self.overclock_rate
-
-        taps = self.taps
-
-        if self.carry is not None:
-            sum_carry_q = Signal.like(self.sum_carry)
-
+        window_valid  = Signal()
+        input_ready   = Signal()
         filters_ready = Signal()
-        window_valid = Signal()
-        input_ready = Signal()
+
+        # filters_ready is driven in _build_mac_chain
         m.d.comb += input_ready.eq(~window_valid | filters_ready)
         if not self.input.signature.always_ready:
             m.d.comb += self.input.ready.eq(input_ready)
 
-        # Samples window.
-        window = [ Signal.like(self.input.p, name=f"window_{i}") for i in range(len(self.taps)) ]
+        sum_carry_q = None
+        if self.carry is not None:
+            sum_carry_q = Signal.like(self.sum_carry)
 
         with m.If(input_ready):
             m.d.sync += window_valid.eq(self.input.valid)
             with m.If(self.input.valid):
                 m.d.sync += window[0].eq(self.input.p)
-                for i in range(1, len(window)):
-                    m.d.sync += window[i].eq(window[i-1])
-                if self.carry is not None:
+                for i in range(1, window_depth):
+                    m.d.sync += window[i].eq(window[i - 1])
+                if sum_carry_q is not None:
                     m.d.sync += sum_carry_q.eq(self.sum_carry)
 
-        # When filter is symmetric, presum samples to obtain a smaller window.
-        symmetric = (self.taps == self.taps[::-1])
-        if symmetric:
-            sum_shape = (self.input.p[0] + self.input.p[0]).shape()
-            odd_symmetric = ((len(self.taps) % 2) == 1)
-            new_len = len(self.taps) // 2 + odd_symmetric
-            new_window = [ Signal(data.ArrayLayout(sum_shape, self.num_channels), name=f"window_sym_{i}") for i in range(new_len) ]
-            for i in range(len(new_window) - odd_symmetric):
-                for c in range(self.num_channels):
-                    m.d.comb += new_window[i][c].eq(window[i][c] + window[-i-1][c])
-            if odd_symmetric:
-                for c in range(self.num_channels):
-                    m.d.comb += new_window[-1][c].eq(window[len(self.taps)//2][c])
-            window = new_window
-            taps = self.taps[:ceil(len(self.taps)/2)]
-            samples_shape = sum_shape
-        else:
-            samples_shape = self.shape
+        return window, window_valid, filters_ready, sum_carry_q
 
-        # Build filter out of SerialMAC16 blocks: each one multiplies and 
-        # accumulates `overclock_factor` taps serially.
+    def _fold_symmetric(self, m, window, taps):
+        symmetric = (taps == taps[::-1])
+        if not symmetric:
+            return window, taps, self.shape
+
+        # New sample shape: sum of two inputs.
+        sum_shape     = (self.input.p[0] + self.input.p[0]).shape()
+        odd_symmetric = (len(taps) % 2) == 1
+        new_len       = len(taps) // 2 + (1 if odd_symmetric else 0)
+
+        new_window = [
+            Signal(data.ArrayLayout(sum_shape, self.num_channels),
+                   name=f"window_sym_{i}")
+            for i in range(new_len)
+        ]
+
+        # pre-sum symmetric pairs
+        for i in range(new_len - (1 if odd_symmetric else 0)):
+            for c in range(self.num_channels):
+                m.d.comb += new_window[i][c].eq(window[i][c] + window[-i - 1][c])
+
+        # center tap for odd length
+        if odd_symmetric:
+            center = len(taps) // 2
+            for c in range(self.num_channels):
+                m.d.comb += new_window[-1][c].eq(window[center][c])
+
+        # truncate tap list to first half (+ center if odd)
+        new_taps = taps[:ceil(len(taps) / 2)]
+
+        return new_window, new_taps
+
+    def _build_mac_chain(self, m, window, window_valid, taps, filters_ready, sum_carry_q):
+        overclock_factor = self.overclock_rate
+
+        # Number of MAC16 blocks
         dsp_block_count = ceil(len(taps) / overclock_factor)
 
-        # If we have multiple subfilters, make them all the same size.
+        # Pad taps to make all blocks the same size, if needed.
         if dsp_block_count > 1 and len(taps) % overclock_factor != 0:
-            taps = taps + [0]*(overclock_factor - (len(taps)%overclock_factor))
+            pad = overclock_factor - (len(taps) % overclock_factor)
+            taps = taps + [0] * pad
 
-        for c in range(self.num_channels):
+        dsp_blocks = []
 
-            dsp_blocks = []
+        for i in range(dsp_block_count):
+            taps_slice   = taps[i * overclock_factor:(i + 1) * overclock_factor]
+            window_slice = window[i * overclock_factor:(i + 1) * overclock_factor]
+            carry        = None if i > 0 else self.carry
 
-            for i in range(dsp_block_count):
-                taps_slice = taps[i*overclock_factor:(i+1)*overclock_factor]
-                window_slice = window[i*overclock_factor:(i+1)*overclock_factor]
-                carry = None if i > 0 else self.carry
-                
-                dsp = SerialMAC16(taps=taps_slice, shape=samples_shape, taps_shape=self.taps_shape(taps), carry=carry, always_ready=self.always_ready)
-                dsp_blocks.append(dsp)
+            block_channels = []
+            for c in range(self.num_channels):
 
-                for j in range(len(window_slice)):
-                    m.d.comb += dsp.input.p[j].eq(window_slice[j][c])
-                    m.d.comb += dsp.input.valid.eq(window_valid)
+                dsp = SerialMAC16(
+                    taps=taps_slice,
+                    shape=window_slice[0][0].shape(),  # element shape
+                    carry=carry,
+                    always_ready=self.always_ready,
+                )
 
+                # Connect window into this MAC16.
+                for j, sample in enumerate(window_slice):
+                    m.d.comb += dsp.input.p[j].eq(sample[c])
+                m.d.comb += dsp.input.valid.eq(window_valid)
+
+                # first block drives filters_ready and captures carry if any
                 if i == 0:
-                    m.d.comb += filters_ready.eq(dsp.input.ready)
-                    if self.carry is not None:
+                    if c == 0:
+                        m.d.comb += filters_ready.eq(dsp.input.ready)
+                    if sum_carry_q is not None:
                         m.d.comb += dsp.sum_carry.eq(sum_carry_q[c])
-            
-            m.submodules += dsp_blocks
 
-            # Adder tree for channel c
-            if dsp_block_count > 1:
-                with m.If(~self.output.valid | self.output.ready):
-                    for i in range(dsp_block_count):
-                        if not dsp_blocks[i].output.signature.always_ready:
-                            m.d.comb += dsp_blocks[i].output.ready.eq(1)
-                    m.d.sync += self.output.valid.eq(dsp_blocks[0].output.valid)
-                    with m.If(dsp_blocks[0].output.valid):
-                        m.d.sync += self.output.payload[c]  .eq(sum(dsp_blocks[i].output.p for i in range(dsp_block_count)))
-            else:
-                m.d.comb += self.output.payload[c].eq(dsp_blocks[0].output.p)
-                m.d.comb += self.output.valid.eq(dsp_blocks[0].output.valid)
-                if not dsp_blocks[0].output.signature.always_ready:
-                    m.d.comb += dsp_blocks[0].output.ready.eq(self.output.ready)
+                block_channels.append(dsp)
+                m.submodules[f"dsp_{i}_{c}"] = dsp
+            dsp_blocks.append(block_channels)
+
+        return dsp_blocks
+
+    def elaborate(self, platform):
+        m = Module()
+
+        # Samples window + sum_carry capture.
+        window, window_valid, filters_ready, sum_carry_q = self._build_window(m)
+
+        # Symmetric folding (if applicable). This is done combinatorially.
+        window, taps = self._fold_symmetric(m, window, self.taps)
+
+        # MAC chain.
+        dsp_blocks = self._build_mac_chain(
+            m,
+            window,
+            window_valid,
+            taps,
+            filters_ready,
+            sum_carry_q,
+        )
+
+        # FIR output stream (full precision).
+        fir_output = stream.Signature(
+            data.ArrayLayout(self.full_shape, self.num_channels),
+            always_ready=self.always_ready,
+        ).create()
+
+        # Final sum.
+        if len(dsp_blocks) == 1:
+            # There's only 1 DSP block per channel: wire directly.
+            block = dsp_blocks[0]
+            m.d.comb += fir_output.valid.eq(block[0].output.valid)
+            for c, blk_chan in enumerate(block):
+                m.d.comb += fir_output.payload[c].eq(blk_chan.output.p)
+                if not blk_chan.output.signature.always_ready:
+                    m.d.comb += blk_chan.output.ready.eq(fir_output.ready)
+        else:
+            # Add results of the individual DSP blocks.
+            advance = Signal()
+            
+            chan_terms = [ [] for _ in range(self.num_channels) ]
+            for blocks in dsp_blocks:
+                for c, blk_chan in enumerate(blocks):
+                    if not blk_chan.output.signature.always_ready:
+                        m.d.comb += blk_chan.output.ready.eq(advance)
+                    chan_terms[c].append(blk_chan.output.p)
+
+            first = dsp_blocks[0]
+            with m.If(~fir_output.valid | fir_output.ready):
+                m.d.sync += fir_output.valid.eq(first[0].output.valid)
+                m.d.comb += advance.eq(1)
+                for c in range(self.num_channels):
+                    m.d.sync += fir_output.payload[c].eq(sum(chan_terms[c]))
+
+        # Perform rounding and saturation when needed.
+        last_output = fir_output
+        if self.full_shape != self.shape_out:
+            last_output = FIRFilter.xform_stage(m, last_output, lambda t: t.round(self.shape_out.f_bits, clip=not self.saturate))
+        if self.saturate:
+            last_output = FIRFilter.xform_stage(m, last_output, lambda t: t.saturate(self.shape_out), domain="comb")
+
+        wiring.connect(m, last_output, wiring.flipped(self.output))
 
         return m
 
@@ -349,7 +401,7 @@ class SerialMAC16(wiring.Component):
         self.shape = shape
         self.taps_shape = taps_shape or self.taps_shape()
         if shape_out is None:
-            shape_out = self.compute_output_shape()
+            shape_out = FIRFilter.compute_output_shape(shape, taps, add_tap=carry)
         self.shape_out = shape_out
         self.always_ready = always_ready
         signature = {
@@ -365,65 +417,69 @@ class SerialMAC16(wiring.Component):
         super().__init__(signature)
 
     def taps_shape(self):
-        taps_as_ratios  = [tap.as_integer_ratio() for tap in self.taps]
-        f_width         = bits_for(max(tap[1] for tap in taps_as_ratios)) - 1
-        i_width         = max(0, bits_for(max(abs(tap[0]) for tap in taps_as_ratios)) - f_width)
-        return fixed.Shape(i_width, f_width, signed=any(tap < 0 for tap in self.taps))
+        _signed        = any(t<0 for t in self.taps)
+        taps_as_ratios = [fixed.Const(tap).as_integer_ratio() for tap in self.taps]
+        max_denom      = max(abs(denom) for _, denom in taps_as_ratios)
+        f_bits         = ceil_log2(max_denom)
+        t_bits         = max(f_bits + _signed, ceil_log2(max(abs(n) * max_denom // d for n,d in taps_as_ratios)))
+        base_shape     = signed if _signed else unsigned
+        return fixed.Shape(base_shape(t_bits), f_bits)
 
     def compute_output_shape(self):
         taps_shape = self.taps_shape
-        signed     = self.shape.signed | taps_shape.signed
-        f_width    = self.shape.f_width + taps_shape.f_width
-        filter_gain = ceil(log2(max(1, sum(self.taps))))
-        i_width    = max(0, self.shape.as_shape().width + taps_shape.as_shape().width - signed - f_width + filter_gain)
+        _signed    = self.shape.signed | taps_shape.signed
+        f_bits     = self.shape.f_bits + taps_shape.f_bits
+        filt_gain  = ceil(log2(sum(self.taps)))
+        i_bits     = max(_signed, self.shape.i_bits + taps_shape.f_bits + filt_gain)
         if self.carry is not None:
-            f_width = max(f_width, self.carry.f_width)
-            i_width = max(i_width, self.carry.i_width) + 1
-        shape_out = fixed.Shape(i_width, f_width, signed=signed)
+            f_bits = max(f_bits, self.carry.f_bits)
+            i_bits = max(i_bits, self.carry.i_bits) + 1
+        shape_out = fixed.SQ(i_bits, f_bits) if _signed else fixed.UQ(i_bits, f_bits)
         return shape_out
 
     def elaborate(self, platform):
         m = Module()
 
-        depth = len(self.taps)
-        counter_in   = Signal(range(depth))
-        dsp_ready = Signal()
-        multin_valid = Signal()
+        depth       = len(self.taps)
+        index       = Signal(range(depth))      # tap index
+        active      = Signal()                  # window is being consumed
+        dsp_ready   = Signal()                  # MAC16 ready
+        dsp_valid   = Signal()                  # valid_in to MAC16
 
+        m.d.comb += active.eq(index != 0)
+
+        # Ready to accept a new window when MAC can start and the last sample
+        # of the previous window is being consumed.
         input_ready = Signal()
-        # Ready to process a sample either when the DSP slice is ready and the samples window is:
-        # - Not valid yet.
-        # - Only valid for 1 more cycle.
-        m.d.comb += input_ready.eq((counter_in == depth-1) & dsp_ready)
+        m.d.comb += input_ready.eq(dsp_ready & (index == depth-1))
         if not self.input.signature.always_ready:
             m.d.comb += self.input.ready.eq(input_ready)
 
-        # Sample counter.
-        with m.If((self.input.valid | (counter_in != 0)) & dsp_ready):
-            m.d.sync += counter_in.eq(_incr(counter_in, depth))
-
-        with m.If(dsp_ready):
-            m.d.sync += multin_valid.eq(self.input.valid | (counter_in != 0))
-
-        # Select sample from window.
+        # Register inputs (valid, sample from window).
         dsp_a = Signal(self.shape)
         with m.If(dsp_ready):
-            with m.Switch(counter_in):
+            m.d.sync += dsp_valid.eq(self.input.valid | active)
+            with m.If(self.input.valid | active):
+                m.d.sync += index.eq(_incr(index, depth))
+            
+            with m.Switch(index):
                 for i in range(depth):
                     with m.Case(i):
                         m.d.sync += dsp_a.eq(self.input.p[i])
+                with m.Default():
+                    m.d.sync += dsp_a.eq(0)
 
         # Coefficient ROM.
         taps_shape = self.taps_shape
         assert taps_shape.as_shape().width <= 16, "DSP slice inputs have a maximum width of 16 bit."
         coeff_data = memory.MemoryData(
             shape=taps_shape,
-            depth=depth,  # +200 to force BRAM
+            depth=depth,
             init=(fixed.Const(tap, shape=taps_shape) for tap in self.taps),
         )
         m.submodules.coeff_rom = coeff_rom = memory.Memory(data=coeff_data)
         coeff_rd = coeff_rom.read_port(domain="sync")
-        m.d.comb += coeff_rd.addr.eq(counter_in)
+        m.d.comb += coeff_rd.addr.eq(index)
         m.d.comb += coeff_rd.en.eq(dsp_ready)
 
         shape_out = self.compute_output_shape()
@@ -432,9 +488,12 @@ class SerialMAC16(wiring.Component):
             sum_carry_q = Signal.like(self.sum_carry)
             with m.If(input_ready):
                 m.d.sync += sum_carry_q.eq(self.sum_carry)
+        else:
+            sum_carry_q = 0
 
         m.submodules.dsp = dsp = iCE40Multiplier(
             o_width=shape_out.as_shape().width,
+            p_width=shape_out.as_shape().width,
             always_ready=self.always_ready)
 
         valid_cnt = Signal(depth, init=1)
@@ -442,8 +501,8 @@ class SerialMAC16(wiring.Component):
         m.d.comb += [
             dsp.a               .eq(dsp_a),
             dsp.b               .eq(coeff_rd.data),
-            shape_out(dsp.p)    .eq(sum_carry_q if self.carry is not None else 0),
-            dsp.valid_in        .eq(multin_valid),
+            shape_out(dsp.p)    .eq(sum_carry_q),
+            dsp.valid_in        .eq(dsp_valid),
             dsp_ready           .eq(dsp.ready_in),
             dsp.p_load          .eq(mult_cnt[0]),
             self.output.p       .eq(shape_out(dsp.o)),
@@ -481,7 +540,6 @@ class iCE40Multiplier(wiring.Component):
         super().__init__(signature)
         self.always_ready = always_ready
         self.p_width = p_width
-        self.o_width = o_width
    
     def elaborate(self, platform):
         m = Module()
@@ -569,16 +627,17 @@ class _TestFilter(unittest.TestCase):
 
     rng = np.random.default_rng(0)
 
-    def _generate_samples(self, count, width, f_width=0):
+    def _generate_samples(self, count, width, f_bits=0):
         # Generate `count` random samples.
         samples = self.rng.normal(0, 1, count)
 
         # Convert to integer.
-        samples = np.round(samples / max(abs(samples)) * (2**(width-1) - 1)).astype(int)
+        samples = np.clip(samples, -1.0, 1.0)
+        samples = np.round(samples * (2**(width-1) - 1)).astype(int)
         assert max(samples) < 2**(width-1) and min(samples) >= -2**(width-1)  # sanity check
 
-        if f_width > 0:
-            return samples / (1 << f_width)
+        if f_bits > 0:
+            return samples / (1 << f_bits)
         return samples
 
     def _filter(self, dut, samples, count, num_channels=1, outfile=None, empty_cycles=0, empty_ready_cycles=0):
@@ -660,8 +719,7 @@ class TestHalfBandDecimatorMAC16(_TestFilter):
     def test_filter(self):
 
         common_dut_options = dict(
-            data_shape=fixed.SQ(7),
-            shape_out=fixed.SQ(0,31),
+            data_shape=fixed.SQ(1,7),
             overclock_rate=4,
         )
 
@@ -709,8 +767,8 @@ class TestHalfBandDecimatorMAC16(_TestFilter):
                 num_samples = scenario["num_samples"]
 
                 input_width = 8
-                samples_i_in = self._generate_samples(num_samples, input_width, f_width=7)
-                samples_q_in = self._generate_samples(num_samples, input_width, f_width=7)
+                samples_i_in = self._generate_samples(num_samples, input_width, f_bits=7)
+                samples_q_in = self._generate_samples(num_samples, input_width, f_bits=7)
 
                 # Compute the expected result
                 filtered_i_np = np.convolve(samples_i_in, taps)[1::2].tolist()
@@ -731,8 +789,7 @@ class TestHalfBandInterpolatorMAC16(_TestFilter):
     def test_filter(self):
 
         common_dut_options = dict(
-            data_shape=fixed.SQ(7),
-            shape_out=fixed.SQ(1,16),
+            data_shape=fixed.SQ(1,7),
             overclock_rate=4,
         )
 
@@ -780,8 +837,8 @@ class TestHalfBandInterpolatorMAC16(_TestFilter):
                 num_samples = scenario["num_samples"]
 
                 input_width = 8
-                samples_i_in = self._generate_samples(num_samples, input_width, f_width=7)
-                samples_q_in = self._generate_samples(num_samples, input_width, f_width=7)
+                samples_i_in = self._generate_samples(num_samples, input_width, f_bits=7)
+                samples_q_in = self._generate_samples(num_samples, input_width, f_bits=7)
 
                 # Compute the expected result
                 input_samples_pad = np.zeros(2*len(samples_i_in))
