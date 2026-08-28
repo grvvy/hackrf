@@ -61,7 +61,6 @@ class Top(Elaboratable):
             "clkconv":          ClockConverter(IQSample(12), 8, "sync", dac_clk, always_ready=False),
 
             # Half-band interpolation stages (+ skid buffers for timing closure).
-            "skid0":            DomainRenamer(dac_clk)(StreamSkidBuffer(IQSample(12), always_ready=False)),
             "hbfir1":           HalfBandInterpolatorMAC16(taps_hb1, data_shape=fixed.SQ(1,11), shape_out=fixed.SQ(1,11),
                 overclock_rate=8, num_channels=2, always_ready=False, domain=dac_clk),
             "skid1":            DomainRenamer(dac_clk)(StreamSkidBuffer(IQSample(12), always_ready=False)),
