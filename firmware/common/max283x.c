@@ -332,6 +332,14 @@ void max283x_rx_calibration(max283x_driver_t* const drv)
 	PRALINE_ONLY(drv, max2831_rx_calibration(&drv->drv.max2831));
 }
 
+/* Values determined by empirical testing. */
+#define MAX2831_TEMP_PRESCALE 2991
+#define MAX2831_TEMP_OFFSET   702910
+#define MAX2837_TEMP_PRESCALE 3824
+#define MAX2837_TEMP_OFFSET   1064719
+#define MAX2839_TEMP_PRESCALE MAX2837_TEMP_PRESCALE
+#define MAX2839_TEMP_OFFSET   MAX2837_TEMP_OFFSET
+
 /* Get chip temperature. */
 int8_t max283x_temperature(max283x_driver_t* const drv)
 {
@@ -344,11 +352,10 @@ int8_t max283x_temperature(max283x_driver_t* const drv)
 	/* Read temperature. */
 	uint16_t value = adc_read(1);
 
-	/* Convert to degrees C, using:
-	 * ADC 0 = 0V, ADC 1023 = 3.3V
-	 * Analog 0.35V = -40C, 1.6V = +85C
-	 * Offset adjusted empirically. */
-	const int32_t prescale = 3332, offset = 928500, divisor = 10000;
+	/* Convert to degrees C. */
+	const int32_t prescale = CONSTANT(drv, int32_t, TEMP_PRESCALE);
+	const int32_t offset = CONSTANT(drv, int32_t, TEMP_OFFSET);
+	const int32_t divisor = 10000;
 
 	return ((value * prescale) - offset) / divisor;
 }
